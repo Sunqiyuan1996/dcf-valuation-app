@@ -79,6 +79,15 @@ Change it deliberately.
 - **A bank suppresses every enterprise exhibit** rather than showing them under a
   disclaimer, and the page subtitle and Excel export both branch on
   `equityValuation` so the spreadsheet can never disagree with the screen.
+- **EDGAR tag lists are searched for the freshest frame, not the first hit.**
+  `bestMatch()` in `lib/secEdgar.ts` evaluates every candidate tag and keeps the
+  one with the latest period end, using tag order only to break ties. This is
+  what fixed "MSFT fiscal year end 2010-06-30": Microsoft moved revenue off
+  `Revenues` at ASC 606, the retired tag stayed in companyfacts with fiscal-2010
+  as its newest frame, and returning the first non-empty tag valued the company
+  on that decade-old income statement — the wrong *figures*, not just a wrong
+  label. `annualHistory()` had the identical flaw and drove the growth rate off
+  the same retired tag. Do not "simplify" either back to first-hit.
 - **The equity workbook's cross-sheet formulas go through the `ECF` and `COE`
   row-address constants** in `lib/equityWorkbook.ts`, keyed off
   `HEADER_ROWS = 3`. A row moving without those constants moving would still open
@@ -118,14 +127,6 @@ are suspect, so vary a query parameter.
 
 ## Open bugs
 
-- **MSFT's fiscal year end reads 2010-06-30.** Microsoft really does close 30
-  June, so month and day are right and only the year is wrong, which points at
-  period selection taking the earliest annual frame rather than the latest —
-  EDGAR companyfacts returns many frames per tag, including decade-old
-  restatements. Unknown and important: whether the *figures* come from that same
-  wrong period or only the label is stale. Trace `financials.fiscalYearEnd`
-  through the EDGAR branch of `route.ts` and `resolveLatest` / `firstMatch` /
-  `latestInstant` in `lib/statements.ts`.
 - **Excess cash reads zero for many non-US listings** and the root cause has
   never been proven. A 'Cash and equivalents' data-quality row now names the
   field, the balance-sheet date, and whether it is interim — that row is what

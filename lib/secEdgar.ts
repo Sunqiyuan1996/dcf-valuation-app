@@ -6,7 +6,7 @@ import { factsFromEdgar, StatementFacts } from './statements';
 
 const SEC_USER_AGENT = 'Valuation Analysis Tool contact@example.com';
 
-interface XbrlFact {
+export interface XbrlFact {
   end: string;
   start?: string;
   val: number;
@@ -16,7 +16,7 @@ interface XbrlFact {
   frame?: string;
 }
 
-interface CompanyFacts {
+export interface CompanyFacts {
   entityName: string;
   facts: {
     'us-gaap'?: Record<string, { units: Record<string, XbrlFact[]> }>;
@@ -93,22 +93,47 @@ function instantsYearApart(items: XbrlFact[] | undefined): number[] {
   return out.map((o) => o.val);
 }
 
-function firstMatch(
+/**
+ * The freshest match across the candidate tags -- deliberately NOT the first
+ * tag that returns anything.
+ *
+ * A tag list is ordered by preference, but a filer that migrated concepts
+ * leaves the abandoned tag in companyfacts forever, still holding its old
+ * frames. Microsoft moved revenue off `Revenues` when ASC 606 came in, so
+ * `Revenues` survives with nothing newer than fiscal 2010. Taking the first
+ * non-empty tag therefore valued Microsoft on its fiscal-2010 income statement
+ * and disclosed it only as "fiscal year end 2010-06-30" in the workbook header.
+ *
+ * Freshness decides; tag order only breaks ties. That keeps the preference
+ * ordering meaningful in the normal case, where several tags cover the same
+ * period and the first is the one we actually want.
+ */
+function bestMatch(
   facts: CompanyFacts,
   tags: string[],
   picker: (items: XbrlFact[] | undefined) => { value: number; end: string } | null
 ): { value: number; end: string; tag: string } | null {
+  let best: { value: number; end: string; tag: string } | null = null;
   for (const tag of tags) {
-    const concept = facts.facts['us-gaap']?.[tag];
-    const usd = concept?.units?.USD;
-    const picked = picker(usd);
-    if (picked) return { ...picked, tag };
+    const picked = picker(facts.facts['us-gaap']?.[tag]?.units?.USD);
+    if (!picked) continue;
+    // Strictly greater, so an equal period end leaves the earlier (preferred)
+    // tag in place.
+    if (best === null || new Date(picked.end).getTime() > new Date(best.end).getTime()) {
+      best = { ...picked, tag };
+    }
   }
-  return null;
+  return best;
 }
 
-/** Last N annual figures for a flow concept (most recent first). */
+/**
+ * Last N annual figures for a flow concept (most recent first). Same freshness
+ * rule as `bestMatch`: a deprecated tag with a long history must not outrank
+ * the tag the filer actually reports under now, or the growth rate is measured
+ * across a decade-old window.
+ */
 function annualHistory(facts: CompanyFacts, tags: string[], count: number): number[] {
+  let best: { end: number; values: number[] } | null = null;
   for (const tag of tags) {
     const items = facts.facts['us-gaap']?.[tag]?.units?.USD;
     if (!items) continue;
@@ -121,9 +146,12 @@ function annualHistory(facts: CompanyFacts, tags: string[], count: number): numb
     const byYear = new Map<string, XbrlFact>();
     for (const a of annual) byYear.set(a.end, a); // de-dupe restated filings by period end
     const sorted = [...byYear.values()].sort((a, b) => new Date(b.end).getTime() - new Date(a.end).getTime());
-    if (sorted.length > 0) return sorted.slice(0, count).map((s) => s.val);
+    const latest = new Date(sorted[0].end).getTime();
+    if (best === null || latest > best.end) {
+      best = { end: latest, values: sorted.slice(0, count).map((s) => s.val) };
+    }
   }
-  return [];
+  return best?.values ?? [];
 }
 
 export const TAGS = {
@@ -195,8 +223,8 @@ export interface SecExtract {
  * stockanalysis.com path produces, so downstream code is source-agnostic.
  */
 export function edgarStatementFacts(facts: CompanyFacts): StatementFacts {
-  const inst = (tags: string[]) => firstMatch(facts, tags, latestInstant)?.value ?? null;
-  const flow = (tags: string[]) => firstMatch(facts, tags, latestAnnualDuration)?.value ?? null;
+  const inst = (tags: string[]) => bestMatch(facts, tags, latestInstant)?.value ?? null;
+  const flow = (tags: string[]) => bestMatch(facts, tags, latestAnnualDuration)?.value ?? null;
 
   const currentAssets = inst(TAGS.currentAssets);
   const currentLiabilities = inst(TAGS.currentLiabilities);
@@ -205,9 +233,9 @@ export function edgarStatementFacts(facts: CompanyFacts): StatementFacts {
   // right choice for a bridge computed as of today, but it means the cash
   // date can differ from the income statement's fiscal year, so record which
   // balance sheet it was and whether it is interim.
-  const cashMatch = firstMatch(facts, TAGS.cash, latestInstant);
+  const cashMatch = bestMatch(facts, TAGS.cash, latestInstant);
   const cash = cashMatch?.value ?? null;
-  const fiscalYearEndDate = firstMatch(facts, TAGS.revenue, latestAnnualDuration)?.end ?? null;
+  const fiscalYearEndDate = bestMatch(facts, TAGS.revenue, latestAnnualDuration)?.end ?? null;
   const shortDebt = inst(TAGS.shortTermDebt);
   const longDebt = inst(TAGS.longTermDebt);
 
@@ -283,20 +311,20 @@ export function edgarStatementFacts(facts: CompanyFacts): StatementFacts {
 export function extractFinancials(facts: CompanyFacts): SecExtract {
   const missing: string[] = [];
 
-  const revenue = firstMatch(facts, TAGS.revenue, latestAnnualDuration);
-  const ebit = firstMatch(facts, TAGS.ebit, latestAnnualDuration);
-  const taxExpense = firstMatch(facts, TAGS.incomeTaxExpense, latestAnnualDuration);
-  const preTaxIncome = firstMatch(facts, TAGS.incomeBeforeTax, latestAnnualDuration);
-  const da = firstMatch(facts, TAGS.depreciationAmortization, latestAnnualDuration);
-  const capex = firstMatch(facts, TAGS.capex, latestAnnualDuration);
-  const currentAssetsThis = firstMatch(facts, TAGS.currentAssets, latestInstant);
-  const currentLiabThis = firstMatch(facts, TAGS.currentLiabilities, latestInstant);
-  const cash = firstMatch(facts, TAGS.cash, latestInstant);
-  const shortDebt = firstMatch(facts, TAGS.shortTermDebt, latestInstant);
-  const longDebt = firstMatch(facts, TAGS.longTermDebt, latestInstant);
-  const netPPE = firstMatch(facts, TAGS.netPPE, latestInstant);
-  const minority = firstMatch(facts, TAGS.minorityInterest, latestInstant);
-  const interestExpense = firstMatch(facts, TAGS.interestExpense, latestAnnualDuration);
+  const revenue = bestMatch(facts, TAGS.revenue, latestAnnualDuration);
+  const ebit = bestMatch(facts, TAGS.ebit, latestAnnualDuration);
+  const taxExpense = bestMatch(facts, TAGS.incomeTaxExpense, latestAnnualDuration);
+  const preTaxIncome = bestMatch(facts, TAGS.incomeBeforeTax, latestAnnualDuration);
+  const da = bestMatch(facts, TAGS.depreciationAmortization, latestAnnualDuration);
+  const capex = bestMatch(facts, TAGS.capex, latestAnnualDuration);
+  const currentAssetsThis = bestMatch(facts, TAGS.currentAssets, latestInstant);
+  const currentLiabThis = bestMatch(facts, TAGS.currentLiabilities, latestInstant);
+  const cash = bestMatch(facts, TAGS.cash, latestInstant);
+  const shortDebt = bestMatch(facts, TAGS.shortTermDebt, latestInstant);
+  const longDebt = bestMatch(facts, TAGS.longTermDebt, latestInstant);
+  const netPPE = bestMatch(facts, TAGS.netPPE, latestInstant);
+  const minority = bestMatch(facts, TAGS.minorityInterest, latestInstant);
+  const interestExpense = bestMatch(facts, TAGS.interestExpense, latestAnnualDuration);
   // Shares outstanding lives in the "dei" namespace (cover-page data), not us-gaap.
   // Note: for multi-class share structures this reports one class's latest count,
   // so it can understate the total -- the value is editable in the UI.

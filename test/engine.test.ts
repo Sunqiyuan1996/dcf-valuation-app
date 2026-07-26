@@ -8,6 +8,7 @@ import { estimateBeta, MARKET_UNLEVERED_BETA, relever, smoothRawBeta, unlever } 
 import { equityDcf, EquityDcfInputs } from '../lib/equityDcf';
 import { buildEquityWorkbook } from '../lib/equityWorkbook';
 import { Cell } from '../lib/xlsx';
+import { CompanyFacts, XbrlFact, edgarStatementFacts, extractFinancials } from '../lib/secEdgar';
 import { Financials } from '../lib/types';
 
 let failures = 0;
@@ -662,6 +663,90 @@ check('the explicit-period sum spans exactly the forecast columns', () => {
   // 10 forecast years start at C, so they end at L.
   assert.equal(m![2], 'L');
   assert.ok(close(cell.v, equityDcf(bank({ netIncome: 150 })).pvExplicitEquityCashFlow));
+});
+
+console.log('EDGAR tag selection');
+
+// Microsoft's shape: revenue was tagged `Revenues` until ASC 606, then
+// `RevenueFromContractWithCustomerExcludingAssessedTax`. The abandoned tag
+// stays in companyfacts forever with its last frames intact, so a picker that
+// takes the first non-empty tag reads the fiscal-2010 income statement.
+function msftShapedFacts(): CompanyFacts {
+  const annual = (end: string, start: string, val: number): XbrlFact => ({
+    end,
+    start,
+    val,
+    fy: Number(end.slice(0, 4)),
+    fp: 'FY',
+    form: '10-K',
+  });
+  return {
+    entityName: 'MICROSOFT CORPORATION',
+    facts: {
+      'us-gaap': {
+        Revenues: {
+          units: {
+            USD: [
+              annual('2009-06-30', '2008-07-01', 58437000000),
+              annual('2010-06-30', '2009-07-01', 62484000000),
+            ],
+          },
+        },
+        RevenueFromContractWithCustomerExcludingAssessedTax: {
+          units: {
+            USD: [
+              annual('2022-06-30', '2021-07-01', 198270000000),
+              annual('2023-06-30', '2022-07-01', 211915000000),
+              annual('2024-06-30', '2023-07-01', 245122000000),
+              annual('2025-06-30', '2024-07-01', 281724000000),
+            ],
+          },
+        },
+        OperatingIncomeLoss: {
+          units: { USD: [annual('2025-06-30', '2024-07-01', 128530000000)] },
+        },
+      },
+    },
+  };
+}
+
+check('a deprecated tag with only old frames does not win over a current one', () => {
+  const x = extractFinancials(msftShapedFacts());
+  // The label was the visible symptom; the figure is the actual defect. Both
+  // come from the same pick, so asserting only the date would let a fix that
+  // relabels without repointing the value pass.
+  assert.equal(x.fiscalYearEnd, '2025-06-30');
+  assert.equal(x.revenue, 281724000000);
+});
+
+check('the growth history is measured on the current tag, not the retired one', () => {
+  // Two frames exist under `Revenues` and four under the ASC 606 tag. Reading
+  // the retired tag would give a 2009-2010 growth rate driving the forecast.
+  const x = extractFinancials(msftShapedFacts());
+  assert.ok(x.revenueCagr3y !== null);
+  const expected = Math.pow(281724000000 / 198270000000, 1 / 3) - 1;
+  assert.ok(
+    close(x.revenueCagr3y!, expected),
+    `expected the 3-year CAGR across the ASC 606 frames, got ${x.revenueCagr3y}`
+  );
+});
+
+check('tag order still decides when two tags cover the same period', () => {
+  // Freshness must not silently reorder preferences. `LongTermDebtNoncurrent`
+  // is listed before `LongTermDebt` because the latter often includes the
+  // current portion; when both report the same date the first must win.
+  const instant = (end: string, val: number): XbrlFact => ({ end, val, fy: 2025, fp: 'FY', form: '10-K' });
+  const facts: CompanyFacts = {
+    entityName: 'Tie Break Co',
+    facts: {
+      'us-gaap': {
+        LongTermDebtNoncurrent: { units: { USD: [instant('2025-06-30', 100)] } },
+        LongTermDebt: { units: { USD: [instant('2025-06-30', 175)] } },
+      },
+    },
+  };
+  const f = edgarStatementFacts(facts);
+  assert.equal(f.totalDebt, 100);
 });
 
 console.log('');
