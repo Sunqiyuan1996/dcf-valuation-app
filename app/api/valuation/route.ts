@@ -492,8 +492,32 @@ export async function POST(req: NextRequest) {
       investedCapitalBuild: [],
       nonoperatingAssetsBuild: [],
       debtEquivalentsBuild: [],
+      totalFundsInvested: 0,
+      financingBuild: [],
+      financingTotal: null,
+      financingReconciliationGap: null,
+      historicalFcfBuild: [],
+      historicalFreeCashFlow: null,
+      investorFlowBuild: [],
+      investorFlowTotal: null,
+      investorFlowReconciliationGap: null,
       adjustments: [],
     };
+
+  log.add(
+    'Total funds invested reconciliation',
+    reorganization.financingReconciliationGap === null ? 'unresolved' : fmtMoney(reorganization.financingReconciliationGap, currency),
+    reorganization.financingReconciliationGap === null
+      ? 'financing-side source fields are incomplete; the gap is not forced to zero'
+      : 'total funds invested less identified debt, debt equivalents, common equity, equity equivalents, hybrids, and noncontrolling interests',
+    reorganization.financingReconciliationGap !== null && Math.abs(reorganization.financingReconciliationGap) <= Math.max(reorganization.totalFundsInvested * 0.01, 1) ? 'derived' : 'estimated'
+  );
+  log.add(
+    'Historical free cash flow reconstruction',
+    reorganization.historicalFreeCashFlow === null ? 'incomplete' : fmtMoney(reorganization.historicalFreeCashFlow, currency),
+    'NOPAT plus observable noncash operating expenses less working capital, net capex, acquisitions, lease investment, and other long-term operating investment',
+    reorganization.historicalFreeCashFlow === null ? 'estimated' : 'derived'
+  );
 
   if (facts !== null && facts.unresolved.length > 0) {
     log.add(

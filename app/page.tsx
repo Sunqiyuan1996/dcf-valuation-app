@@ -92,6 +92,8 @@ export default function Home() {
   const [recommendationsLoading, setRecommendationsLoading] = useState(true);
   const [recommendationsAsOf, setRecommendationsAsOf] = useState<string | null>(null);
   const [recommendationSourceFailures, setRecommendationSourceFailures] = useState(0);
+  const [recommendationUnavailable, setRecommendationUnavailable] = useState(false);
+  const [recommendationBusinessDate, setRecommendationBusinessDate] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -102,6 +104,8 @@ export default function Home() {
         setRecommendations(json.recommendations ?? []);
         setRecommendationsAsOf(json.asOf ?? null);
         setRecommendationSourceFailures(json.sourceFailures ?? 0);
+        setRecommendationUnavailable(Boolean(json.screenUnavailable));
+        setRecommendationBusinessDate(json.businessDate ?? null);
       })
       .catch(() => {})
       .finally(() => active && setRecommendationsLoading(false));
@@ -217,7 +221,7 @@ export default function Home() {
         {!data && !needsInput && !error && (
           <>
             <MarketBrief />
-            <Recommendations items={recommendations} loading={recommendationsLoading} asOf={recommendationsAsOf} sourceFailures={recommendationSourceFailures} onSelect={setTicker} />
+            <Recommendations items={recommendations} loading={recommendationsLoading} asOf={recommendationsAsOf} businessDate={recommendationBusinessDate} unavailable={recommendationUnavailable} sourceFailures={recommendationSourceFailures} onSelect={setTicker} />
             <EmptyState loading={loading} />
           </>
         )}
@@ -261,16 +265,16 @@ function MarketBrief() {
   );
 }
 
-function Recommendations({ items, loading, asOf, sourceFailures, onSelect }: { items: Recommendation[]; loading: boolean; asOf: string | null; sourceFailures: number; onSelect: (ticker: string) => void }) {
+function Recommendations({ items, loading, asOf, businessDate, unavailable, sourceFailures, onSelect }: { items: Recommendation[]; loading: boolean; asOf: string | null; businessDate: string | null; unavailable: boolean; sourceFailures: number; onSelect: (ticker: string) => void }) {
   return (
     <section className="mb-5 rounded-xl border border-slate-200 bg-white shadow-sm">
       <div className="flex flex-wrap items-end justify-between gap-3 border-b border-slate-100 px-5 py-4">
         <div><div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-700">Daily opportunity screen</div><h2 className="mt-1 font-serif text-xl text-slate-900">Quality compounders below intrinsic value</h2></div>
-        <div className="text-right text-[11px] text-slate-400">{asOf ? `Screened ${new Date(asOf).toLocaleDateString()}` : 'Screening live data'}<br />1–10 results when available</div>
+        <div className="text-right text-[11px] text-slate-400">{businessDate ? `Market data through ${businessDate}` : asOf ? `Screened ${new Date(asOf).toLocaleDateString()}` : 'Screening live data'}<br />Weekends retain Friday&apos;s screen</div>
       </div>
       {loading ? (
         <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">{[1, 2, 3].map((x) => <div key={x} className="h-36 animate-pulse rounded-lg bg-slate-100" />)}</div>
-      ) : items.length === 0 && sourceFailures > 0 ? (
+      ) : items.length === 0 && unavailable ? (
         <div className="px-5 py-8 text-center text-sm text-amber-700">The daily screen is temporarily unavailable because one or more market-data sources could not be reached. No recommendation conclusion was drawn.</div>
       ) : items.length === 0 ? (
         <div className="px-5 py-8 text-center text-sm text-slate-500">No candidate clears every rule today. The screen does not loosen its 30% margin-of-safety threshold to fill the list.</div>
@@ -979,6 +983,42 @@ function Results({
           <Build title="Nonoperating assets" items={reorg.nonoperatingAssetsBuild} currency={c} />
           <Build title="Financing debt" items={[{ label: 'Reported borrowings and leases', value: f.totalDebt, note: 'deducted in the equity bridge' }]} currency={c} />
           <Build title="Debt equivalents" items={reorg.debtEquivalentsBuild} currency={c} />
+        </div>
+      </Panel>
+
+      <Panel
+        title="Total funds invested reconciliation"
+        chapter="Ch. 9"
+        subtitle="The operating and financing views should describe the same capital. A visible gap means source fields or classifications remain unresolved."
+      >
+        <div className="grid gap-6 p-1 sm:grid-cols-2">
+          <Build title="Funds invested" items={[
+            { label: 'Invested capital', value: f.investedCapital },
+            { label: 'Excess cash and marketable securities', value: f.excessCash },
+            { label: 'Other nonoperating assets', value: f.nonoperatingAssets },
+          ]} currency={c} />
+          <Build title="Financing" items={reorg.financingBuild} currency={c} />
+        </div>
+        <div className="mt-4 grid gap-3 border-t border-slate-100 pt-4 sm:grid-cols-3">
+          <Stat label="Total funds invested" value={m(reorg.totalFundsInvested)} bold />
+          <Stat label="Financing identified" value={reorg.financingTotal === null ? 'Incomplete' : m(reorg.financingTotal)} />
+          <Stat label="Reconciliation gap" value={reorg.financingReconciliationGap === null ? 'Unresolved' : m(reorg.financingReconciliationGap)} tone={reorg.financingReconciliationGap !== null && Math.abs(reorg.financingReconciliationGap) <= Math.max(reorg.totalFundsInvested * 0.01, 1) ? 'good' : 'bad'} />
+        </div>
+      </Panel>
+
+      <Panel
+        title="Historical free cash flow reconstruction"
+        chapter="Ch. 9"
+        subtitle="NOPAT plus noncash operating expenses, less each observable investment in invested capital. Missing components remain unresolved rather than becoming zero."
+      >
+        <div className="grid gap-6 sm:grid-cols-2">
+          <Build title="Free cash flow" items={reorg.historicalFcfBuild} currency={c} />
+          <Build title="Cash available to investors" items={reorg.investorFlowBuild} currency={c} />
+        </div>
+        <div className="mt-4 grid gap-3 border-t border-slate-100 pt-4 sm:grid-cols-3">
+          <Stat label="Historical FCF" value={reorg.historicalFreeCashFlow === null ? 'Incomplete' : m(reorg.historicalFreeCashFlow)} bold />
+          <Stat label="Investor-flow reconciliation" value={reorg.investorFlowTotal === null ? 'Incomplete' : m(reorg.investorFlowTotal)} />
+          <Stat label="Cash-flow reconciliation gap" value={reorg.investorFlowReconciliationGap === null ? 'Unresolved' : m(reorg.investorFlowReconciliationGap)} tone={reorg.investorFlowReconciliationGap !== null && Math.abs(reorg.investorFlowReconciliationGap) <= Math.max(Math.abs(reorg.historicalFreeCashFlow ?? 0) * 0.01, 1) ? 'good' : 'bad'} />
         </div>
       </Panel>
 

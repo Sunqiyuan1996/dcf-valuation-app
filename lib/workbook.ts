@@ -157,19 +157,17 @@ function investedCapitalSheet(p: ValuationPayload): Sheet {
   rows.push([bold('Debt equivalents'), { v: f.debtEquivalents, s: 'total' }, '']);
   rows.push([]);
 
-  const totalFunds = f.investedCapital + f.excessCash + f.nonoperatingAssets;
+  const totalFunds = reorg.totalFundsInvested;
   rows.push([section('Total funds invested'), section(''), section('')]);
   rows.push(['Invested capital', money(f.investedCapital), '']);
   rows.push(['Excess cash and marketable securities', money(f.excessCash), 'Operating cash held separately']);
   rows.push(['Nonoperating assets', money(f.nonoperatingAssets), '']);
   rows.push([bold('Total funds invested'), { v: totalFunds, s: 'total' }, '']);
   rows.push([]);
-  rows.push(['Operating cash (inside invested capital)', money(f.operatingCash), '']);
-  rows.push(['Total debt', money(f.totalDebt), '']);
-  rows.push(['Minority interest', money(f.minorityInterest), '']);
-  rows.push([
-    note('The financing side of the funds-invested identity (debt + debt equivalents + minority + book equity) is not reconstructed here because book equity is not among the fetched fields.'),
-  ]);
+  rows.push([section('Financing reconciliation'), section(''), section('')]);
+  for (const item of reorg.financingBuild) rows.push([item.label, money(item.value), item.note ?? '']);
+  rows.push([bold('Financing identified'), reorg.financingTotal === null ? note('Incomplete') : { v: reorg.financingTotal, s: 'total' }, '']);
+  rows.push([bold('Reconciliation gap'), reorg.financingReconciliationGap === null ? note('Unresolved') : { v: reorg.financingReconciliationGap, s: 'total' }, 'Must approach zero before the accounting reorganization is considered complete']);
   rows.push([]);
 
   rows.push([{ v: 'Invested capital roll-forward', s: 'header' }, { v: 'Opening invested capital', s: 'header' }, { v: 'Net investment', s: 'header' }]);
@@ -195,6 +193,16 @@ function investedCapitalSheet(p: ValuationPayload): Sheet {
 function freeCashFlowSheet(p: ValuationPayload): Sheet {
   const rows: Cell[][] = [...sheetHeader(p, 'Free cash flow', 'Koller Ch. 9')];
   const fc = p.result.forecast;
+  const reorg = p.reorganization;
+  rows.push([{ v: 'Historical FCF reconstruction', s: 'header' }, { v: 'Amount', s: 'header' }]);
+  for (const item of reorg.historicalFcfBuild) rows.push([item.label, money(item.value)]);
+  rows.push([bold('Historical free cash flow'), reorg.historicalFreeCashFlow === null ? note('Incomplete') : { v: reorg.historicalFreeCashFlow, s: 'total' }]);
+  rows.push([]);
+  rows.push([{ v: 'Cash available to investors', s: 'header' }, { v: 'Amount', s: 'header' }]);
+  for (const item of reorg.investorFlowBuild) rows.push([item.label, money(item.value)]);
+  rows.push([bold('Investor-flow total'), reorg.investorFlowTotal === null ? note('Incomplete') : { v: reorg.investorFlowTotal, s: 'total' }]);
+  rows.push([bold('Cash-flow reconciliation gap'), reorg.investorFlowReconciliationGap === null ? note('Unresolved') : { v: reorg.investorFlowReconciliationGap, s: 'total' }]);
+  rows.push([]);
   const headerRow = rows.length + 1;
   rows.push(yearHeader(p, 'Free cash flow'));
 

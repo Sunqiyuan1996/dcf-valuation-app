@@ -353,10 +353,17 @@ export function reorganize(
       note: 'earnings sit below the operating line, so the stake is valued separately',
     });
   }
+  if (f.financialSubsidiaries !== null) {
+    nonoperatingAssetsBuild.push({ label: 'Financial subsidiaries', value: f.financialSubsidiaries });
+  }
+  if (f.otherNonoperatingAssets !== null) {
+    nonoperatingAssetsBuild.push({ label: 'Other nonoperating assets', value: f.otherNonoperatingAssets });
+  }
   // Excess cash is shown in the build list because it is conceptually a
   // nonoperating asset, but it is returned as its own field so the Ch. 14
   // bridge can show it on a separate line without double counting.
-  const nonoperatingAssets = num(f.longTermInvestments) + num(f.equityInvestments);
+  const nonoperatingAssets = num(f.longTermInvestments) + num(f.equityInvestments) +
+    num(f.financialSubsidiaries) + num(f.otherNonoperatingAssets);
 
   adjustments.push({
     label: 'Separate nonoperating assets',
@@ -406,6 +413,9 @@ export function reorganize(
   if (f.pensionObligations !== null && f.pensionObligations > 0) {
     debtEquivalentsBuild.push({ label: 'Unfunded pension and retirement obligations', value: f.pensionObligations, note: 'Ch. 19' });
   }
+  if (f.restructuringReserves !== null && f.restructuringReserves > 0) {
+    debtEquivalentsBuild.push({ label: 'Restructuring reserves', value: f.restructuringReserves, note: 'Ch. 19' });
+  }
   const debtEquivalents = debtEquivalentsBuild.reduce((s, l) => s + l.value, 0);
   // StockAnalysis's standardized Total Debt includes the current and long-term
   // lease rows (SAP is an observable example). Once leases are shown as debt
@@ -417,18 +427,19 @@ export function reorganize(
       : reportedDebt;
 
   adjustments.push(
-    f.pensionObligations !== null && f.pensionObligations > 0
+    (f.pensionObligations !== null && f.pensionObligations > 0) ||
+    (f.restructuringReserves !== null && f.restructuringReserves > 0)
       ? {
           label: 'Provisions as debt equivalents',
           chapter: 'Ch. 19 (provisions)',
           applied: true,
-          detail: 'Unfunded retirement obligations are debt-like: deducted in the bridge and weighted as debt in the WACC.',
+          detail: 'Unfunded retirement obligations and restructuring reserves are debt-like: deducted in the bridge and weighted as debt in the WACC.',
           effects: [{ field: 'debtEquivalents', from: leaseLiability ?? 0, to: debtEquivalents }],
         }
       : skipped(
           'Provisions as debt equivalents',
           'Ch. 19 (provisions)',
-          'No pension or retirement obligation line found in the source data.'
+          'No pension, retirement, or restructuring-reserve line found in the source data.'
         )
   );
 
@@ -446,6 +457,18 @@ export function reorganize(
     ebit = cycle.normalizedEbit;
   } else {
     adjustments.push(skipped('Normalize the base year for the cycle', 'Part 5 (cyclical companies)', cycle.detail));
+  }
+
+  if (f.restructuringCharges !== null && f.restructuringCharges > 0 && ebit !== null) {
+    const before = ebit;
+    ebit += f.restructuringCharges;
+    adjustments.push({
+      label: 'Remove nonoperating restructuring charges', chapter: 'Ch. 19 (provisions)', applied: true,
+      detail: 'Current restructuring charge removed from operating profit; the related reserve is treated as a debt equivalent when disclosed.',
+      effects: [{ field: 'ebit', from: before, to: ebit }],
+    });
+  } else {
+    adjustments.push(skipped('Remove nonoperating restructuring charges', 'Ch. 19 (provisions)', 'No separately identified current restructuring charge was available.'));
   }
 
   const rnd = capitalizeRnd(f.researchDevelopmentHistory.length > 0 ? f.researchDevelopmentHistory : f.researchDevelopment !== null ? [f.researchDevelopment] : []);
@@ -477,10 +500,15 @@ export function reorganize(
   }
 
   // --- Ch. 9: invested capital build -------------------------------------
-  // Operating working capital excludes excess cash; short-term debt sitting
-  // inside current liabilities is a known understatement of this line when the
-  // source only gives a net working-capital figure.
-  const operatingWorkingCapital = f.workingCapital === null ? null : f.workingCapital - excessCash;
+  // Prefer a line-by-line operating build: remove nonoperating cash and
+  // marketable securities from current assets, and financing debt/leases from
+  // current liabilities. Fall back to reported net working capital only when
+  // the two sides are unavailable.
+  const operatingWorkingCapital =
+    f.currentAssets !== null && f.currentLiabilities !== null
+      ? f.currentAssets - cash - num(f.shortTermInvestments) -
+        (f.currentLiabilities - num(f.shortTermDebt) - num(f.currentLeaseLiabilities))
+      : f.workingCapital === null ? null : f.workingCapital - excessCash;
 
   const investedCapitalBuild: LineItem[] = [];
   if (f.netPPE !== null) investedCapitalBuild.push({ label: 'Net property, plant and equipment', value: f.netPPE });
@@ -488,7 +516,9 @@ export function reorganize(
     investedCapitalBuild.push({
       label: 'Operating working capital',
       value: operatingWorkingCapital,
-      note: 'net working capital less excess cash',
+      note: f.currentAssets !== null && f.currentLiabilities !== null
+        ? 'operating current assets less noninterest-bearing operating current liabilities'
+        : 'fallback: reported net working capital less excess cash',
     });
   }
   if (f.goodwill !== null && f.goodwill > 0) {
@@ -502,6 +532,20 @@ export function reorganize(
   }
   if (rndAsset > 0) {
     investedCapitalBuild.push({ label: 'Capitalized R&D', value: rndAsset, note: 'Ch. 22' });
+  }
+  const otherOperatingAssets = Math.max(
+    num(f.otherOperatingAssets) - num(f.deferredTaxAssets) - num(f.overfundedPensionAssets), 0
+  );
+  const otherOperatingLiabilities = Math.max(
+    num(f.otherOperatingLiabilities) - num(f.deferredTaxLiabilities) - num(f.pensionObligations) - num(f.restructuringReserves), 0
+  );
+  const otherOperatingNet = otherOperatingAssets - otherOperatingLiabilities;
+  if (f.otherOperatingAssets !== null || f.otherOperatingLiabilities !== null) {
+    investedCapitalBuild.push({
+      label: 'Other operating assets, net of liabilities',
+      value: otherOperatingNet,
+      note: 'residual long-term operating balances after separately classified tax, pension and restructuring items',
+    });
   }
 
   const haveCore = f.netPPE !== null || operatingWorkingCapital !== null;
@@ -541,6 +585,61 @@ export function reorganize(
   // (negative = cash used). Our convention is positive = outflow.
   const changeInNWC = f.changeInNWC === null ? null : -f.changeInNWC;
 
+  if (f.overfundedPensionAssets !== null && f.overfundedPensionAssets > 0) {
+    nonoperatingAssetsBuild.push({ label: 'Overfunded pension assets', value: f.overfundedPensionAssets });
+  }
+  if (f.deferredTaxAssets !== null && f.deferredTaxAssets > 0) {
+    nonoperatingAssetsBuild.push({ label: 'Deferred tax assets / tax attributes', value: f.deferredTaxAssets, note: 'proxy where tax-loss carryforwards are not separately tagged' });
+  }
+  const expandedNonoperatingAssets = nonoperatingAssets + num(f.overfundedPensionAssets) + num(f.deferredTaxAssets);
+  const totalFundsInvested = num(investedCapital) + excessCash + expandedNonoperatingAssets;
+
+  const commonEquity = f.totalEquity === null ? null : Math.max(f.totalEquity - num(f.minorityInterest) - num(f.hybridSecurities), 0);
+  const financingBuild: LineItem[] = [];
+  if (totalDebt !== null) financingBuild.push({ label: 'Financing debt', value: totalDebt });
+  if (debtEquivalents > 0) financingBuild.push({ label: 'Debt equivalents', value: debtEquivalents });
+  if (commonEquity !== null) financingBuild.push({ label: 'Common equity', value: commonEquity });
+  if (f.deferredTaxLiabilities !== null) financingBuild.push({ label: 'Deferred-tax equity equivalents', value: f.deferredTaxLiabilities });
+  if (f.hybridSecurities !== null) financingBuild.push({ label: 'Hybrid securities', value: f.hybridSecurities });
+  if (f.minorityInterest !== null) financingBuild.push({ label: 'Noncontrolling interests', value: f.minorityInterest });
+  const financingComplete = totalDebt !== null && commonEquity !== null;
+  const financingTotal = financingComplete ? financingBuild.reduce((sum, item) => sum + item.value, 0) : null;
+  const financingReconciliationGap = financingTotal === null ? null : totalFundsInvested - financingTotal;
+
+  const nopat = ebit !== null && (tax.rate ?? tax.effectiveRate) !== null
+    ? ebit * (1 - (tax.rate ?? tax.effectiveRate as number)) : null;
+  const netCapex = f.capex === null ? null : f.capex - num(f.assetDisposals);
+  const changeLeaseAssets = f.operatingLeaseAssetsHistory.length >= 2
+    ? f.operatingLeaseAssetsHistory[0] - f.operatingLeaseAssetsHistory[1] : null;
+  const changeOtherOperatingNet = f.otherOperatingAssetsHistory.length >= 2 && f.otherOperatingLiabilitiesHistory.length >= 2
+    ? (f.otherOperatingAssetsHistory[0] - f.otherOperatingAssetsHistory[1]) -
+      (f.otherOperatingLiabilitiesHistory[0] - f.otherOperatingLiabilitiesHistory[1]) : null;
+  const historicalFcfBuild: LineItem[] = [];
+  if (nopat !== null) historicalFcfBuild.push({ label: 'NOPAT', value: nopat });
+  if (f.depreciationAmortization !== null) historicalFcfBuild.push({ label: 'Noncash operating expenses (D&A)', value: f.depreciationAmortization });
+  if (changeInNWC !== null) historicalFcfBuild.push({ label: 'Investment in operating working capital', value: -changeInNWC });
+  if (netCapex !== null) historicalFcfBuild.push({ label: 'Capital expenditure, net of disposals', value: -netCapex });
+  if (f.acquisitions !== null) historicalFcfBuild.push({ label: 'Investment in acquired intangibles and goodwill', value: -Math.abs(f.acquisitions) });
+  if (changeLeaseAssets !== null) historicalFcfBuild.push({ label: 'Change in capitalized operating leases', value: -changeLeaseAssets });
+  if (changeOtherOperatingNet !== null) historicalFcfBuild.push({ label: 'Change in other long-term operating assets, net of liabilities', value: -changeOtherOperatingNet });
+  const historicalFcfComplete = nopat !== null && f.depreciationAmortization !== null && changeInNWC !== null && netCapex !== null;
+  const historicalFreeCashFlow = historicalFcfComplete
+    ? (nopat as number) + f.depreciationAmortization! - changeInNWC! - netCapex! - Math.abs(f.acquisitions ?? 0) -
+      (changeLeaseAssets ?? 0) - (changeOtherOperatingNet ?? 0)
+    : null;
+
+  const investorFlowBuild: LineItem[] = [];
+  if (f.interestExpense !== null) investorFlowBuild.push({ label: 'Interest paid to lenders', value: f.interestExpense });
+  if (f.debtRepayment !== null) investorFlowBuild.push({ label: 'Debt repayments', value: Math.abs(f.debtRepayment) });
+  if (f.debtIssuance !== null) investorFlowBuild.push({ label: 'Less: debt issued', value: -Math.abs(f.debtIssuance) });
+  if (f.dividendsPaid !== null) investorFlowBuild.push({ label: 'Dividends', value: Math.abs(f.dividendsPaid) });
+  if (f.shareRepurchases !== null) investorFlowBuild.push({ label: 'Share repurchases', value: Math.abs(f.shareRepurchases) });
+  if (f.shareIssuance !== null) investorFlowBuild.push({ label: 'Less: shares issued', value: -Math.abs(f.shareIssuance) });
+  const investorFlowComplete = [f.interestExpense, f.debtRepayment, f.debtIssuance, f.dividendsPaid, f.shareRepurchases, f.shareIssuance].every((value) => value !== null);
+  const investorFlowTotal = investorFlowComplete ? investorFlowBuild.reduce((sum, item) => sum + item.value, 0) : null;
+  const investorFlowReconciliationGap = investorFlowTotal === null || historicalFreeCashFlow === null
+    ? null : historicalFreeCashFlow - investorFlowTotal;
+
   return {
     revenue,
     ebit,
@@ -548,7 +647,7 @@ export function reorganize(
     investedCapital,
     operatingCash,
     excessCash,
-    nonoperatingAssets,
+    nonoperatingAssets: expandedNonoperatingAssets,
     debtEquivalents,
     totalDebt,
     minorityInterest: f.minorityInterest,
@@ -561,6 +660,15 @@ export function reorganize(
       investedCapitalBuild,
       nonoperatingAssetsBuild,
       debtEquivalentsBuild,
+      totalFundsInvested,
+      financingBuild,
+      financingTotal,
+      financingReconciliationGap,
+      historicalFcfBuild,
+      historicalFreeCashFlow,
+      investorFlowBuild,
+      investorFlowTotal,
+      investorFlowReconciliationGap,
       adjustments,
     },
   };

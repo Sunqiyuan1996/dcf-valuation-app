@@ -182,6 +182,8 @@ const A = {
   currentAssets: ['totalCurrentAssets', 'currentAssets', 'assetsCurrent'],
   currentLiabilities: ['totalCurrentLiabilities', 'currentLiabilities', 'liabilitiesCurrent'],
   totalAssets: ['totalAssets', 'assets'],
+  otherOperatingAssets: ['otherOperatingAssets', 'otherLongTermOperatingAssets', 'otherLongTermAssets'],
+  otherOperatingLiabilities: ['otherOperatingLiabilities', 'otherLongTermOperatingLiabilities', 'otherLongTermLiabilities'],
   goodwill: ['goodwill'],
   intangibles: ['intangibles', 'otherIntangibleAssets', 'intangibleAssets'],
   goodwillAndIntangibles: ['goodwillAndIntangibles', 'goodwillIntangibles'],
@@ -207,6 +209,8 @@ const A = {
   shortTermInvestments: ['shortTermInvestments', 'stInvestments', 'investmentsCurrent', 'marketableSecurities'],
   longTermInvestments: ['longTermInvestments', 'ltInvestments', 'investments'],
   equityInvestments: ['equityInvestments', 'investmentsInAffiliates', 'equityMethodInvestments'],
+  financialSubsidiaries: ['financialSubsidiaries', 'investmentsInFinancialSubsidiaries'],
+  otherNonoperatingAssets: ['otherNonoperatingAssets', 'assetsHeldForSale'],
   totalDebt: ['debt', 'totalDebt'],
   shortTermDebt: ['currentDebt', 'shortTermDebt', 'stDebt'],
   longTermDebt: ['longTermDebt', 'ltDebt', 'nonCurrentDebt'],
@@ -223,7 +227,11 @@ const A = {
   longTermLeaseLiabilities: ['longTermLeases', 'longTermLeaseLiabilities', 'leasesNonCurrent'],
   operatingLeaseAssets: ['operatingLeaseAssets', 'rightOfUseAssets', 'operatingLeaseRightOfUseAsset'],
   pensionObligations: ['pensionObligations', 'pensions', 'retirementBenefitObligations', 'pensionLiabilities'],
+  restructuringReserves: ['restructuringReserves', 'restructuringLiabilities', 'restructuringProvision'],
+  overfundedPensionAssets: ['pensionAssets', 'overfundedPensionAssets', 'definedBenefitPlanAssets'],
   deferredTaxLiabilities: ['deferredTaxLiabilities', 'deferredIncomeTaxes', 'deferredTaxes'],
+  deferredTaxAssets: ['deferredTaxAssets', 'deferredTaxAssetsNet', 'taxLossCarryforwards'],
+  hybridSecurities: ['preferredStock', 'preferredEquity', 'hybridSecurities'],
   deferredRevenue: ['deferredRevenue', 'unearnedRevenue'],
   sharesOutstanding: ['sharesOutTotalCommon', 'sharesOutstanding', 'commonSharesOutstanding'],
 
@@ -245,6 +253,12 @@ const A = {
   ],
   stockBasedCompensation: ['stockBasedCompensation', 'sbcomp', 'sbc', 'shareBasedCompensation'],
   acquisitions: ['acquisitions', 'netAcquisitions', 'cashAcquisitions'],
+  assetDisposals: ['assetDisposals', 'proceedsFromAssetSales', 'saleOfPPE'],
+  debtIssuance: ['debtIssued', 'issuanceOfDebt', 'proceedsFromDebt'],
+  debtRepayment: ['debtRepayment', 'repaymentOfDebt', 'debtRepaid'],
+  dividendsPaid: ['dividendsPaid', 'commonDividendsPaid', 'paymentOfDividends'],
+  shareIssuance: ['commonStockIssued', 'issuanceOfCommonStock', 'proceedsFromStockIssuance'],
+  shareRepurchases: ['shareRepurchases', 'repurchaseOfCommonStock', 'commonStockRepurchased'],
   operatingCashFlow: ['operatingCashFlow', 'ocf', 'netCashProvidedByOperatingActivities'],
 
   // --- income statement ----------------------------------------------------
@@ -262,6 +276,7 @@ const A = {
   /** Net income as it opens the cash flow statement — the fallback source. */
   netIncomeCashFlow: ['netIncomeCF', 'netIncome', 'netinccmn'],
   nonoperatingIncome: ['otherNonOperatingIncome', 'nonOperatingIncome', 'otherIncome'],
+  restructuringCharges: ['restructuringCharges', 'restructuringExpense', 'reorganizationCosts'],
 };
 
 /**
@@ -278,23 +293,42 @@ export interface StatementFacts {
   intangibles: number | null;
   totalAssets: number | null;
   totalEquity: number | null;
+  currentAssets: number | null;
+  currentLiabilities: number | null;
+  shortTermDebt: number | null;
+  otherOperatingAssets: number | null;
+  otherOperatingLiabilities: number | null;
 
   cash: number | null;
   shortTermInvestments: number | null;
   longTermInvestments: number | null;
   equityInvestments: number | null;
+  financialSubsidiaries: number | null;
+  otherNonoperatingAssets: number | null;
 
   totalDebt: number | null;
   operatingLeaseLiabilities: number | null;
+  currentLeaseLiabilities: number | null;
   operatingLeaseAssets: number | null;
   pensionObligations: number | null;
+  restructuringReserves: number | null;
+  overfundedPensionAssets: number | null;
   deferredTaxLiabilities: number | null;
+  deferredTaxAssets: number | null;
+  hybridSecurities: number | null;
   minorityInterest: number | null;
 
   depreciationAmortization: number | null;
   capex: number | null;
   changeInNWC: number | null;
   stockBasedCompensation: number | null;
+  acquisitions: number | null;
+  assetDisposals: number | null;
+  debtIssuance: number | null;
+  debtRepayment: number | null;
+  dividendsPaid: number | null;
+  shareIssuance: number | null;
+  shareRepurchases: number | null;
 
   revenue: number | null;
   ebit: number | null;
@@ -305,10 +339,14 @@ export interface StatementFacts {
   pretaxIncome: number | null;
   incomeTaxExpense: number | null;
   netIncome: number | null;
+  restructuringCharges: number | null;
 
   revenueHistory: number[];
   ebitHistory: number[];
   researchDevelopmentHistory: number[];
+  operatingLeaseAssetsHistory: number[];
+  otherOperatingAssetsHistory: number[];
+  otherOperatingLiabilitiesHistory: number[];
 
   /**
    * Which balance-sheet line and which column the cash balance was read from.
@@ -331,20 +369,39 @@ function emptyFacts(source: StatementFacts['source']): StatementFacts {
     intangibles: null,
     totalAssets: null,
     totalEquity: null,
+    currentAssets: null,
+    currentLiabilities: null,
+    shortTermDebt: null,
+    otherOperatingAssets: null,
+    otherOperatingLiabilities: null,
     cash: null,
     shortTermInvestments: null,
     longTermInvestments: null,
     equityInvestments: null,
+    financialSubsidiaries: null,
+    otherNonoperatingAssets: null,
     totalDebt: null,
     operatingLeaseLiabilities: null,
+    currentLeaseLiabilities: null,
     operatingLeaseAssets: null,
     pensionObligations: null,
+    restructuringReserves: null,
+    overfundedPensionAssets: null,
     deferredTaxLiabilities: null,
+    deferredTaxAssets: null,
+    hybridSecurities: null,
     minorityInterest: null,
     depreciationAmortization: null,
     capex: null,
     changeInNWC: null,
     stockBasedCompensation: null,
+    acquisitions: null,
+    assetDisposals: null,
+    debtIssuance: null,
+    debtRepayment: null,
+    dividendsPaid: null,
+    shareIssuance: null,
+    shareRepurchases: null,
     revenue: null,
     ebit: null,
     ebitda: null,
@@ -354,9 +411,13 @@ function emptyFacts(source: StatementFacts['source']): StatementFacts {
     pretaxIncome: null,
     incomeTaxExpense: null,
     netIncome: null,
+    restructuringCharges: null,
     revenueHistory: [],
     ebitHistory: [],
     researchDevelopmentHistory: [],
+    operatingLeaseAssetsHistory: [],
+    otherOperatingAssetsHistory: [],
+    otherOperatingLiabilitiesHistory: [],
     cashSource: null,
     unresolved: [],
   };
@@ -388,6 +449,11 @@ export async function saStatementFacts(listing: SaListing): Promise<StatementFac
   f.intangibles = latestIncludingTtm(bs, A.intangibles);
   f.totalAssets = latestIncludingTtm(bs, A.totalAssets);
   f.totalEquity = latestIncludingTtm(bs, A.totalEquity);
+  f.currentAssets = latestIncludingTtm(bs, A.currentAssets);
+  f.currentLiabilities = latestIncludingTtm(bs, A.currentLiabilities);
+  f.shortTermDebt = latestIncludingTtm(bs, A.shortTermDebt);
+  f.otherOperatingAssets = latestIncludingTtm(bs, A.otherOperatingAssets);
+  f.otherOperatingLiabilities = latestIncludingTtm(bs, A.otherOperatingLiabilities);
   // Cash: the latest balance sheet wins whether it is the fiscal year end or a
   // more recent interim column, since a stock figure is as of a date and the
   // freshest one is the most relevant to today's bridge. Which it was gets
@@ -413,6 +479,8 @@ export async function saStatementFacts(listing: SaListing): Promise<StatementFac
   }
   f.longTermInvestments = latestIncludingTtm(bs, A.longTermInvestments);
   f.equityInvestments = latestIncludingTtm(bs, A.equityInvestments);
+  f.financialSubsidiaries = latestIncludingTtm(bs, A.financialSubsidiaries);
+  f.otherNonoperatingAssets = latestIncludingTtm(bs, A.otherNonoperatingAssets);
   f.totalDebt = latestIncludingTtm(bs, A.totalDebt);
   if (f.totalDebt === null) {
     const sd = latestIncludingTtm(bs, A.shortTermDebt);
@@ -420,14 +488,19 @@ export async function saStatementFacts(listing: SaListing): Promise<StatementFac
     if (sd !== null || ld !== null) f.totalDebt = (sd ?? 0) + (ld ?? 0);
   }
   f.operatingLeaseLiabilities = latestIncludingTtm(bs, A.operatingLeaseLiabilities);
+  f.currentLeaseLiabilities = latestIncludingTtm(bs, A.currentLeaseLiabilities);
   if (f.operatingLeaseLiabilities === null) {
-    const currentLease = latestIncludingTtm(bs, A.currentLeaseLiabilities);
+    const currentLease = f.currentLeaseLiabilities;
     const longLease = latestIncludingTtm(bs, A.longTermLeaseLiabilities);
     if (currentLease !== null || longLease !== null) f.operatingLeaseLiabilities = (currentLease ?? 0) + (longLease ?? 0);
   }
   f.operatingLeaseAssets = latestIncludingTtm(bs, A.operatingLeaseAssets);
   f.pensionObligations = latestIncludingTtm(bs, A.pensionObligations);
+  f.restructuringReserves = latestIncludingTtm(bs, A.restructuringReserves);
+  f.overfundedPensionAssets = latestIncludingTtm(bs, A.overfundedPensionAssets);
   f.deferredTaxLiabilities = latestIncludingTtm(bs, A.deferredTaxLiabilities);
+  f.deferredTaxAssets = latestIncludingTtm(bs, A.deferredTaxAssets);
+  f.hybridSecurities = latestIncludingTtm(bs, A.hybridSecurities);
   f.minorityInterest = latestIncludingTtm(bs, A.minorityInterest);
 
   // Cash-flow and income-statement flows: fiscal year only, so a TTM column
@@ -437,6 +510,13 @@ export async function saStatementFacts(listing: SaListing): Promise<StatementFac
   f.capex = capex === null ? null : Math.abs(capex);
   f.changeInNWC = latest(cf, A.changeInNWC);
   f.stockBasedCompensation = latest(cf, A.stockBasedCompensation);
+  f.acquisitions = latest(cf, A.acquisitions);
+  f.assetDisposals = latest(cf, A.assetDisposals);
+  f.debtIssuance = latest(cf, A.debtIssuance);
+  f.debtRepayment = latest(cf, A.debtRepayment);
+  f.dividendsPaid = latest(cf, A.dividendsPaid);
+  f.shareIssuance = latest(cf, A.shareIssuance);
+  f.shareRepurchases = latest(cf, A.shareRepurchases);
 
   f.revenue = latest(is, A.revenue);
   f.ebit = latest(is, A.ebit);
@@ -453,10 +533,14 @@ export async function saStatementFacts(listing: SaListing): Promise<StatementFac
   // its cash-flow payload carries netIncomeCF. For a bank this is the figure the
   // whole equity model runs on, so it is worth the second look.
   f.netIncome = latest(is, A.netIncome) ?? latest(cf, A.netIncomeCashFlow);
+  f.restructuringCharges = latest(is, A.restructuringCharges);
 
   f.revenueHistory = numericSeries(is, A.revenue) ?? [];
   f.ebitHistory = numericSeries(is, A.ebit) ?? [];
   f.researchDevelopmentHistory = numericSeries(is, A.researchDevelopment) ?? [];
+  f.operatingLeaseAssetsHistory = numericSeries(bs, A.operatingLeaseAssets) ?? [];
+  f.otherOperatingAssetsHistory = numericSeries(bs, A.otherOperatingAssets) ?? [];
+  f.otherOperatingLiabilitiesHistory = numericSeries(bs, A.otherOperatingLiabilities) ?? [];
 
   f.unresolved = unresolvedNames(f);
   return f;

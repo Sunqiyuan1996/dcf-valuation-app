@@ -1,14 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchCompanyFacts, resolveTickerToCik, screenRecommendationHistory } from '@/lib/secEdgar';
 import { POST as valueTicker } from '@/app/api/valuation/route';
+import { unstable_cache } from 'next/cache';
+import { latestBusinessDate } from '@/lib/businessDate';
 
 export const maxDuration = 60;
+export const dynamic = 'force-dynamic';
 
 const CANDIDATES = [
   ['JPM', 'Financials'], ['AXP', 'Financials'], ['SPGI', 'Financials'], ['CME', 'Financials'],
   ['JNJ', 'Pharmaceuticals'], ['MRK', 'Pharmaceuticals'], ['LLY', 'Pharmaceuticals'],
   ['AMGN', 'Biotechnology'], ['GILD', 'Biotechnology'], ['ABBV', 'Biotechnology'],
   ['MSFT', 'Software'], ['ADP', 'Business services'], ['V', 'Payments'], ['MA', 'Payments'],
+  ['MCO', 'Financial data'], ['MSCI', 'Financial data'], ['ICE', 'Financial infrastructure'],
+  ['NDAQ', 'Financial infrastructure'], ['FDS', 'Financial data'], ['AON', 'Insurance services'],
+  ['MMC', 'Insurance services'], ['BMY', 'Pharmaceuticals'], ['PFE', 'Pharmaceuticals'],
+  ['ABT', 'Medical technology'], ['TMO', 'Life-science tools'], ['SYK', 'Medical technology'],
+  ['ORCL', 'Software'], ['ACN', 'Business services'], ['INTU', 'Software'], ['PAYX', 'Business services'],
+  ['ROP', 'Industrial technology'], ['VRSK', 'Data analytics'], ['CTAS', 'Business services'],
 ] as const;
 
 async function inspect(ticker: string, industry: string) {
@@ -53,21 +62,43 @@ async function inspect(ticker: string, industry: string) {
   }
 }
 
-export async function GET() {
-  const settled = await Promise.all(CANDIDATES.map(([ticker, industry]) => inspect(ticker, industry)));
+async function runScreen() {
+  const settled: Awaited<ReturnType<typeof inspect>>[] = [];
+  // Stay comfortably below SEC's request-rate guidance instead of bursting
+  // the full universe and turning throttling into a false empty screen.
+  for (let i = 0; i < CANDIDATES.length; i += 5) {
+    settled.push(...await Promise.all(CANDIDATES.slice(i, i + 5).map(([ticker, industry]) => inspect(ticker, industry))));
+  }
+  const sourceFailures = settled.filter((result) => result.status === 'source-error').length;
+  // Throwing preserves Next's last successfully cached value during a failed
+  // revalidation instead of replacing Friday's recommendations with an error.
+  if (sourceFailures === CANDIDATES.length) throw new Error('All recommendation sources failed');
   const recommendations = settled
     .map((result) => result.item)
     .filter((item): item is NonNullable<typeof item> => item !== null)
     .sort((a, b) => b.discountToFairValue - a.discountToFairValue)
     .slice(0, 10);
-  return NextResponse.json(
-    {
-      asOf: new Date().toISOString(),
-      universeSize: CANDIDATES.length,
-      sourceFailures: settled.filter((result) => result.status === 'source-error').length,
-      methodology: 'High-ROIC-sector candidate screen; not an exhaustive market-wide scan.',
-      recommendations,
-    },
-    { headers: { 'Cache-Control': 'public, s-maxage=86400, stale-while-revalidate=3600' } }
-  );
+  return {
+    asOf: new Date().toISOString(), businessDate: latestBusinessDate(), universeSize: CANDIDATES.length,
+    sourceFailures, screenUnavailable: false,
+    methodology: 'High-ROIC-sector candidate screen; not an exhaustive market-wide scan.', recommendations,
+  };
+}
+
+const cachedScreen = unstable_cache(runScreen, ['daily-opportunity-screen-v2'], {
+  revalidate: 21600,
+  tags: ['daily-opportunity-screen'],
+});
+
+export async function GET() {
+  try {
+    const payload = await cachedScreen();
+    return NextResponse.json(payload, { headers: { 'Cache-Control': 'public, s-maxage=21600, stale-while-revalidate=172800' } });
+  } catch {
+    return NextResponse.json({
+      asOf: new Date().toISOString(), businessDate: latestBusinessDate(), universeSize: CANDIDATES.length,
+      sourceFailures: CANDIDATES.length, screenUnavailable: true, recommendations: [],
+      methodology: 'No successful screen has been cached yet.',
+    }, { headers: { 'Cache-Control': 'no-store' } });
+  }
 }

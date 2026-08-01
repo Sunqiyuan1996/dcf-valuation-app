@@ -253,6 +253,8 @@ export const TAGS = {
   shortTermInvestments: ['ShortTermInvestments', 'AvailableForSaleSecuritiesDebtSecuritiesCurrent', 'MarketableSecuritiesCurrent'],
   longTermInvestments: ['LongTermInvestments', 'AvailableForSaleSecuritiesDebtSecuritiesNoncurrent', 'MarketableSecuritiesNoncurrent'],
   equityInvestments: ['EquityMethodInvestments', 'EquitySecuritiesFvNiCurrentAndNoncurrent'],
+  financialSubsidiaries: ['InvestmentInFinancialServicesSubsidiaries'],
+  otherNonoperatingAssets: ['AssetsHeldForSale'],
   // ASC 842 splits the operating-lease liability across current and noncurrent.
   operatingLeaseLiabilityCurrent: ['OperatingLeaseLiabilityCurrent'],
   operatingLeaseLiabilityNoncurrent: ['OperatingLeaseLiabilityNoncurrent'],
@@ -263,10 +265,24 @@ export const TAGS = {
     'PensionAndOtherPostretirementDefinedBenefitPlansLiabilitiesNoncurrent',
   ],
   deferredTaxLiabilities: ['DeferredIncomeTaxLiabilitiesNet', 'DeferredTaxLiabilitiesNoncurrent'],
+  deferredTaxAssets: ['DeferredTaxAssetsNet', 'DeferredTaxAssetsOther', 'DeferredIncomeTaxAssetsNet'],
+  restructuringReserves: ['RestructuringReserve', 'RestructuringCostsLiability'],
+  overfundedPensionAssets: ['DefinedBenefitPlanAssetsForPlanBenefits', 'PensionAndOtherPostretirementDefinedBenefitPlansAssetsCurrent'],
+  hybridSecurities: ['PreferredStocksIncludingAdditionalPaidInCapital', 'PreferredStockValue'],
+  otherOperatingAssets: ['OtherAssetsNoncurrent'],
+  otherOperatingLiabilities: ['OtherLiabilitiesNoncurrent'],
   researchDevelopment: ['ResearchAndDevelopmentExpense'],
   interestIncome: ['InvestmentIncomeInterest', 'InterestAndDividendIncomeOperating'],
   netIncome: ['NetIncomeLoss'],
+  restructuringCharges: ['RestructuringCharges', 'RestructuringCosts'],
   stockBasedCompensation: ['ShareBasedCompensation', 'AllocatedShareBasedCompensationExpense'],
+  acquisitions: ['PaymentsToAcquireBusinessesNetOfCashAcquired'],
+  assetDisposals: ['ProceedsFromSaleOfPropertyPlantAndEquipment'],
+  debtIssuance: ['ProceedsFromIssuanceOfLongTermDebt', 'ProceedsFromIssuanceOfDebt'],
+  debtRepayment: ['RepaymentsOfLongTermDebt', 'RepaymentsOfDebt'],
+  dividendsPaid: ['PaymentsOfDividends', 'PaymentsOfDividendsCommonStock'],
+  shareIssuance: ['ProceedsFromStockOptionsExercised', 'ProceedsFromIssuanceOfCommonStock'],
+  shareRepurchases: ['PaymentsForRepurchaseOfCommonStock'],
   ebitda: [],
 };
 
@@ -324,7 +340,10 @@ export function edgarStatementFacts(facts: CompanyFacts): StatementFacts {
   const clSeries = instantsYearApart(facts.facts['us-gaap']?.[TAGS.currentLiabilities[0]]?.units?.USD);
   const changeInNWC =
     caSeries.length >= 2 && clSeries.length >= 2
-      ? caSeries[0] - clSeries[0] - (caSeries[1] - clSeries[1])
+      // Normalize to the cash-flow-statement convention used by
+      // StatementFacts: an increase in working capital is a negative cash
+      // effect. reorganize() flips it back to a positive investment outflow.
+      ? -(caSeries[0] - clSeries[0] - (caSeries[1] - clSeries[1]))
       : null;
 
   const capex = flow(TAGS.capex);
@@ -338,23 +357,42 @@ export function edgarStatementFacts(facts: CompanyFacts): StatementFacts {
     intangibles: inst(TAGS.intangibles),
     totalAssets: inst(TAGS.totalAssets),
     totalEquity: inst(TAGS.totalEquity),
+    currentAssets,
+    currentLiabilities,
+    shortTermDebt: shortDebt,
+    otherOperatingAssets: inst(TAGS.otherOperatingAssets),
+    otherOperatingLiabilities: inst(TAGS.otherOperatingLiabilities),
 
     cash,
     shortTermInvestments: inst(TAGS.shortTermInvestments),
     longTermInvestments: inst(TAGS.longTermInvestments),
     equityInvestments: inst(TAGS.equityInvestments),
+    financialSubsidiaries: inst(TAGS.financialSubsidiaries),
+    otherNonoperatingAssets: inst(TAGS.otherNonoperatingAssets),
 
     totalDebt,
     operatingLeaseLiabilities,
+    currentLeaseLiabilities: leaseCurrent,
     operatingLeaseAssets: inst(TAGS.operatingLeaseAssets),
     pensionObligations: inst(TAGS.pensionObligations),
+    restructuringReserves: inst(TAGS.restructuringReserves),
+    overfundedPensionAssets: inst(TAGS.overfundedPensionAssets),
     deferredTaxLiabilities: inst(TAGS.deferredTaxLiabilities),
+    deferredTaxAssets: inst(TAGS.deferredTaxAssets),
+    hybridSecurities: inst(TAGS.hybridSecurities),
     minorityInterest: inst(TAGS.minorityInterest),
 
     depreciationAmortization: flow(TAGS.depreciationAmortization),
     capex: capex === null ? null : Math.abs(capex),
     changeInNWC,
     stockBasedCompensation: flow(TAGS.stockBasedCompensation),
+    acquisitions: flow(TAGS.acquisitions),
+    assetDisposals: flow(TAGS.assetDisposals),
+    debtIssuance: flow(TAGS.debtIssuance),
+    debtRepayment: flow(TAGS.debtRepayment),
+    dividendsPaid: flow(TAGS.dividendsPaid),
+    shareIssuance: flow(TAGS.shareIssuance),
+    shareRepurchases: flow(TAGS.shareRepurchases),
 
     revenue: flow(TAGS.revenue),
     ebit: flow(TAGS.ebit),
@@ -364,10 +402,14 @@ export function edgarStatementFacts(facts: CompanyFacts): StatementFacts {
     pretaxIncome: flow(TAGS.incomeBeforeTax),
     incomeTaxExpense: flow(TAGS.incomeTaxExpense),
     netIncome: flow(TAGS.netIncome),
+    restructuringCharges: flow(TAGS.restructuringCharges),
 
     revenueHistory: annualHistory(facts, TAGS.revenue, 8),
     ebitHistory: annualHistory(facts, TAGS.ebit, 8),
     researchDevelopmentHistory: annualHistory(facts, TAGS.researchDevelopment, 5),
+    operatingLeaseAssetsHistory: instantsYearApart(facts.facts['us-gaap']?.[TAGS.operatingLeaseAssets[0]]?.units?.USD),
+    otherOperatingAssetsHistory: instantsYearApart(facts.facts['us-gaap']?.[TAGS.otherOperatingAssets[0]]?.units?.USD),
+    otherOperatingLiabilitiesHistory: instantsYearApart(facts.facts['us-gaap']?.[TAGS.otherOperatingLiabilities[0]]?.units?.USD),
 
     cashSource:
       cashMatch === null

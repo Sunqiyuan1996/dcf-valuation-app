@@ -10,6 +10,7 @@ import { buildEquityWorkbook } from '../lib/equityWorkbook';
 import { Cell } from '../lib/xlsx';
 import { CompanyFacts, XbrlFact, edgarStatementFacts, extractFinancials, screenRecommendationHistory } from '../lib/secEdgar';
 import { Financials } from '../lib/types';
+import { latestBusinessDate } from '../lib/businessDate';
 
 let failures = 0;
 function check(name: string, fn: () => void) {
@@ -773,7 +774,44 @@ check('summary debt fills a missing detailed statement balance', () => {
   assert.equal(r.totalDebt, 300);
 });
 
+check('full funds-invested schedule reconciles operating and financing views', () => {
+  const f = factsFromEdgar({});
+  Object.assign(f, {
+    revenue: 1000, ebit: 150, cash: 120, shortTermInvestments: 30,
+    currentAssets: 500, currentLiabilities: 250, shortTermDebt: 50, currentLeaseLiabilities: 20,
+    netPPE: 600, totalDebt: 300, operatingLeaseLiabilities: 80,
+    totalEquity: 560, minorityInterest: 20, deferredTaxLiabilities: 40,
+    incomeTaxExpense: 30, pretaxIncome: 100, interestExpense: 20,
+  });
+  const r = reorganize('Reconciled Industrials', f, { marginalTaxRate: 0.25 });
+  const owc = r.reorganization.investedCapitalBuild.find((item) => item.label === 'Operating working capital');
+  assert.equal(owc?.value, 170);
+  assert.equal(r.reorganization.totalFundsInvested, 980);
+  assert.equal(r.reorganization.financingTotal, 980);
+  assert.equal(r.reorganization.financingReconciliationGap, 0);
+});
+
+check('historical FCF is reconstructed from observable investment components', () => {
+  const f = factsFromEdgar({});
+  Object.assign(f, {
+    revenue: 1000, ebit: 150, netPPE: 600, workingCapital: 100,
+    incomeTaxExpense: 30, pretaxIncome: 100, interestExpense: 20,
+    depreciationAmortization: 60, changeInNWC: -25, capex: 90,
+    assetDisposals: 10, acquisitions: 20,
+  });
+  const r = reorganize('Cash Flow Industrials', f, { marginalTaxRate: 0.25 });
+  // Operating taxes = 30 + 25% x 20 = 35; NOPAT = 115.
+  // FCF = 115 + 60 - 25 - (90 - 10) - 20 = 50.
+  assert.equal(r.reorganization.historicalFreeCashFlow, 50);
+});
+
 console.log('recommendation history screen');
+
+check('weekend recommendation dates retain Friday', () => {
+  assert.equal(latestBusinessDate(new Date('2026-08-01T12:00:00Z')), '2026-07-31');
+  assert.equal(latestBusinessDate(new Date('2026-08-02T12:00:00Z')), '2026-07-31');
+  assert.equal(latestBusinessDate(new Date('2026-08-03T12:00:00Z')), '2026-08-03');
+});
 
 check('the screen requires stress resilience, a decade public, and five non-declining dividends', () => {
   const annual = (year: number, val: number): XbrlFact => ({

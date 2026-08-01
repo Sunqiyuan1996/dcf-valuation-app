@@ -113,6 +113,15 @@ export interface Reorganization {
   investedCapitalBuild: LineItem[];
   nonoperatingAssetsBuild: LineItem[];
   debtEquivalentsBuild: LineItem[];
+  totalFundsInvested: number;
+  financingBuild: LineItem[];
+  financingTotal: number | null;
+  financingReconciliationGap: number | null;
+  historicalFcfBuild: LineItem[];
+  historicalFreeCashFlow: number | null;
+  investorFlowBuild: LineItem[];
+  investorFlowTotal: number | null;
+  investorFlowReconciliationGap: number | null;
   adjustments: Adjustment[];
 }
 
