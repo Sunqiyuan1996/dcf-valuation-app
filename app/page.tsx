@@ -1,6 +1,6 @@
 'use client';
 
-import { ReactNode, useState } from 'react';
+import { ReactNode, useEffect, useState } from 'react';
 import {
   Adjustment,
   Confidence,
@@ -45,6 +45,20 @@ interface ApiNeedsInput {
 
 type ApiResponse = ApiSuccess | ApiNeedsInput | { error: string };
 
+interface Recommendation {
+  ticker: string;
+  companyName: string;
+  industry: string;
+  currency: string;
+  price: number;
+  fairValue: number;
+  discountToFairValue: number;
+  publicYears: number;
+  stressPeriods: Array<{ period: string; growth: number }>;
+  dividendYears: Array<{ year: number; dividendPerShare: number }>;
+  model: string;
+}
+
 const CONFIDENCE_LABEL: Record<Confidence, string> = {
   source: 'From filing',
   derived: 'Calculated',
@@ -74,6 +88,25 @@ export default function Home() {
   const [manualValues, setManualValues] = useState<Record<string, string>>({});
   const [data, setData] = useState<ApiSuccess | null>(null);
   const [assumptionDraft, setAssumptionDraft] = useState<DcfAssumptions | null>(null);
+  const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
+  const [recommendationsLoading, setRecommendationsLoading] = useState(true);
+  const [recommendationsAsOf, setRecommendationsAsOf] = useState<string | null>(null);
+  const [recommendationSourceFailures, setRecommendationSourceFailures] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    fetch('/api/recommendations')
+      .then((res) => res.json())
+      .then((json) => {
+        if (!active) return;
+        setRecommendations(json.recommendations ?? []);
+        setRecommendationsAsOf(json.asOf ?? null);
+        setRecommendationSourceFailures(json.sourceFailures ?? 0);
+      })
+      .catch(() => {})
+      .finally(() => active && setRecommendationsLoading(false));
+    return () => { active = false; };
+  }, []);
 
   async function runValuation(overrides?: { financialOverrides?: any; assumptionOverrides?: any }) {
     setLoading(true);
@@ -121,10 +154,13 @@ export default function Home() {
 
   return (
     <main className="min-h-screen pb-16">
-      <header className="sticky top-0 z-20 border-b border-slate-800 bg-ink">
+      <header className="sticky top-0 z-20 border-b border-slate-700/70 bg-ink/95 shadow-lg shadow-slate-950/10 backdrop-blur">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-3 px-6 py-3">
           <div className="mr-auto">
-            <div className="text-sm font-semibold tracking-tight text-white">Valuation Analysis</div>
+            <div className="flex items-center gap-2 text-sm font-semibold tracking-[0.08em] text-white">
+              <span className="grid h-7 w-7 place-items-center rounded-sm border border-emerald-400/40 bg-emerald-400/10 font-serif text-emerald-300">V</span>
+              VALUATION DESK
+            </div>
             {/* The subtitle names the method that produced the number on screen.
                 A bank is valued with the Part 5 equity model and every enterprise
                 exhibit is suppressed, so claiming "Enterprise DCF" there is not a
@@ -178,7 +214,13 @@ export default function Home() {
           </div>
         )}
 
-        {!data && !needsInput && !error && <EmptyState loading={loading} />}
+        {!data && !needsInput && !error && (
+          <>
+            <MarketBrief />
+            <Recommendations items={recommendations} loading={recommendationsLoading} asOf={recommendationsAsOf} sourceFailures={recommendationSourceFailures} onSelect={setTicker} />
+            <EmptyState loading={loading} />
+          </>
+        )}
 
         {data && assumptionDraft && (
           <Results
@@ -200,9 +242,57 @@ export default function Home() {
   );
 }
 
+function MarketBrief() {
+  return (
+    <section className="mb-5 overflow-hidden rounded-xl border border-slate-800 bg-ink text-white shadow-xl shadow-slate-900/10">
+      <div className="grid gap-6 px-6 py-7 md:grid-cols-[1.5fr_1fr]">
+        <div>
+          <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.22em] text-emerald-300">Intrinsic value research</div>
+          <h1 className="max-w-2xl font-serif text-3xl leading-tight md:text-4xl">Price is observable. Value requires a point of view.</h1>
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">Institutional-style DCF analysis with every source, estimate, and accounting adjustment disclosed.</p>
+        </div>
+        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-slate-700 bg-slate-700 text-xs">
+          {[["Framework", "McKinsey DCF"], ["Coverage", "OECD + China A/H"], ["Models", "Enterprise / Equity"], ["Output", "Fair value / share"]].map(([a, b]) => (
+            <div className="bg-slate-900/80 p-3" key={a}><div className="text-slate-500">{a}</div><div className="mt-1 font-medium text-slate-100">{b}</div></div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function Recommendations({ items, loading, asOf, sourceFailures, onSelect }: { items: Recommendation[]; loading: boolean; asOf: string | null; sourceFailures: number; onSelect: (ticker: string) => void }) {
+  return (
+    <section className="mb-5 rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex flex-wrap items-end justify-between gap-3 border-b border-slate-100 px-5 py-4">
+        <div><div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-700">Daily opportunity screen</div><h2 className="mt-1 font-serif text-xl text-slate-900">Quality compounders below intrinsic value</h2></div>
+        <div className="text-right text-[11px] text-slate-400">{asOf ? `Screened ${new Date(asOf).toLocaleDateString()}` : 'Screening live data'}<br />1–10 results when available</div>
+      </div>
+      {loading ? (
+        <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">{[1, 2, 3].map((x) => <div key={x} className="h-36 animate-pulse rounded-lg bg-slate-100" />)}</div>
+      ) : items.length === 0 && sourceFailures > 0 ? (
+        <div className="px-5 py-8 text-center text-sm text-amber-700">The daily screen is temporarily unavailable because one or more market-data sources could not be reached. No recommendation conclusion was drawn.</div>
+      ) : items.length === 0 ? (
+        <div className="px-5 py-8 text-center text-sm text-slate-500">No candidate clears every rule today. The screen does not loosen its 30% margin-of-safety threshold to fill the list.</div>
+      ) : (
+        <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
+          {items.map((item) => (
+            <button key={item.ticker} onClick={() => onSelect(item.ticker)} className="group rounded-lg border border-slate-200 p-4 text-left transition hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-md">
+              <div className="flex items-start justify-between"><div><div className="font-mono text-base font-bold text-slate-900">{item.ticker}</div><div className="mt-0.5 line-clamp-1 text-xs text-slate-500">{item.companyName}</div></div><span className="rounded bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">+{fmtPct(item.discountToFairValue)}</span></div>
+              <div className="mt-4 flex items-end justify-between"><div><div className="text-[10px] uppercase tracking-wide text-slate-400">Price / fair value</div><div className="mt-1 font-mono text-sm">{money(item.price, item.currency, false)} <span className="text-slate-300">/</span> {money(item.fairValue, item.currency, false)}</div></div><span className="text-xs text-emerald-700 opacity-0 transition group-hover:opacity-100">Analyze →</span></div>
+              <div className="mt-3 border-t border-slate-100 pt-3 text-[10px] text-slate-400">{item.industry} · {item.publicYears}+ years public · {item.stressPeriods.length} stress periods passed · 5y no dividend cut</div>
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="border-t border-slate-100 px-5 py-3 text-[10px] leading-4 text-slate-400">Screen: revenue did not decline across at least two available stress windows (2008–09, 2014–15, 2019–20); no dividend-per-share cut in the latest five fiscal years; public 10+ years; model fair value exceeds price by more than 30%. Focused high-ROIC-sector candidate universe, not a complete global-market scan. Research only.</div>
+    </section>
+  );
+}
+
 function EmptyState({ loading }: { loading: boolean }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-10 text-center">
+    <div className="rounded-xl border border-slate-200 bg-white p-10 text-center shadow-sm">
       <h2 className="text-lg font-semibold">{loading ? 'Pulling filings…' : 'Enter a ticker to value a company'}</h2>
       <p className="mx-auto mt-2 max-w-xl text-sm text-slate-500">
         Every figure is fetched, reorganized into operating and nonoperating items, and discounted on the value-driver

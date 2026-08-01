@@ -154,6 +154,78 @@ function annualHistory(facts: CompanyFacts, tags: string[], count: number): numb
   return best?.values ?? [];
 }
 
+export interface RecommendationHistoryScreen {
+  publicYears: number;
+  publicAtLeastTenYears: boolean;
+  stressPeriods: Array<{ period: string; from: number; to: number; growth: number; passed: boolean }>;
+  revenueStressPassed: boolean;
+  dividendYears: Array<{ year: number; dividendPerShare: number }>;
+  dividendGrowthPassed: boolean;
+}
+
+const DIVIDEND_PER_SHARE_TAGS = [
+  'CommonStockDividendsPerShareDeclared',
+  'CommonStockDividendsPerShareCashPaid',
+];
+
+/**
+ * Evidence used by the daily recommendation screen. Unlike `annualHistory`,
+ * this deliberately merges retired and current tags by fiscal year: the
+ * question here spans recessions, so old, valid frames are evidence rather
+ * than a stale-value hazard.
+ */
+export function screenRecommendationHistory(facts: CompanyFacts): RecommendationHistoryScreen {
+  const annualByYear = (tags: string[], unit: string): Map<number, number> => {
+    const out = new Map<number, number>();
+    for (const tag of [...tags].reverse()) {
+      const items = facts.facts['us-gaap']?.[tag]?.units?.[unit] ?? [];
+      for (const item of items) {
+        if (item.form !== '10-K' || item.fp !== 'FY' || !item.start || !Number.isFinite(item.val)) continue;
+        const days = (new Date(item.end).getTime() - new Date(item.start).getTime()) / 86400000;
+        if (days < 300 || days > 430) continue;
+        const year = Number(item.end.slice(0, 4));
+        if (Number.isFinite(year)) out.set(year, item.val);
+      }
+    }
+    return out;
+  };
+
+  const revenue = annualByYear(TAGS.revenue, 'USD');
+  const years = [...revenue.keys()].sort((a, b) => a - b);
+  const publicYears = years.length > 1 ? years[years.length - 1] - years[0] : 0;
+  const comparisons: Array<[number, number, string]> = [
+    [2008, 2009, '2008–2009'],
+    [2014, 2015, '2014–2015'],
+    [2019, 2020, '2019–2020'],
+  ];
+  const stressPeriods = comparisons.flatMap(([a, b, period]) => {
+    const from = revenue.get(a);
+    const to = revenue.get(b);
+    if (from === undefined || to === undefined || from <= 0) return [];
+    const growth = to / from - 1;
+    return [{ period, from, to, growth, passed: growth >= 0 }];
+  });
+
+  const dividends = annualByYear(DIVIDEND_PER_SHARE_TAGS, 'USD/shares');
+  const dividendYears = [...dividends.entries()]
+    .sort((a, b) => b[0] - a[0])
+    .slice(0, 5)
+    .sort((a, b) => a[0] - b[0])
+    .map(([year, dividendPerShare]) => ({ year, dividendPerShare }));
+  const dividendGrowthPassed =
+    dividendYears.length === 5 &&
+    dividendYears.every((row, i) => i === 0 || row.dividendPerShare >= dividendYears[i - 1].dividendPerShare);
+
+  return {
+    publicYears,
+    publicAtLeastTenYears: publicYears >= 10,
+    stressPeriods,
+    revenueStressPassed: stressPeriods.length >= 2 && stressPeriods.every((period) => period.passed),
+    dividendYears,
+    dividendGrowthPassed,
+  };
+}
+
 export const TAGS = {
   revenue: ['Revenues', 'RevenueFromContractWithCustomerExcludingAssessedTax', 'SalesRevenueNet', 'SalesRevenueGoodsNet'],
   ebit: ['OperatingIncomeLoss'],

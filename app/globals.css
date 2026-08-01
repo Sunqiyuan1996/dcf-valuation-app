@@ -3,6 +3,11 @@
 @tailwind utilities;
 
 body {
-  background-color: #f8fafc;
+  background:
+    radial-gradient(circle at 15% 0%, rgba(16, 185, 129, 0.06), transparent 28rem),
+    #f4f6f8;
   color: #0f172a;
+  font-feature-settings: "tnum" 1, "ss01" 1;
 }
+
+::selection { background: #a7f3d0; color: #0f172a; }

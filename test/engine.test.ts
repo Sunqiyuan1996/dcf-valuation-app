@@ -8,7 +8,7 @@ import { estimateBeta, MARKET_UNLEVERED_BETA, relever, smoothRawBeta, unlever } 
 import { equityDcf, EquityDcfInputs } from '../lib/equityDcf';
 import { buildEquityWorkbook } from '../lib/equityWorkbook';
 import { Cell } from '../lib/xlsx';
-import { CompanyFacts, XbrlFact, edgarStatementFacts, extractFinancials } from '../lib/secEdgar';
+import { CompanyFacts, XbrlFact, edgarStatementFacts, extractFinancials, screenRecommendationHistory } from '../lib/secEdgar';
 import { Financials } from '../lib/types';
 
 let failures = 0;
@@ -747,6 +747,41 @@ check('tag order still decides when two tags cover the same period', () => {
   };
   const f = edgarStatementFacts(facts);
   assert.equal(f.totalDebt, 100);
+});
+
+console.log('recommendation history screen');
+
+check('the screen requires stress resilience, a decade public, and five non-declining dividends', () => {
+  const annual = (year: number, val: number): XbrlFact => ({
+    start: `${year - 1}-01-01`, end: `${year}-01-01`, val, fy: year, fp: 'FY', form: '10-K',
+  });
+  const facts: CompanyFacts = {
+    entityName: 'Durable Compounder',
+    facts: { 'us-gaap': {
+      Revenues: { units: { USD: [
+        annual(2008, 100), annual(2009, 105), annual(2014, 150), annual(2015, 160),
+        annual(2019, 200), annual(2020, 205), annual(2025, 300),
+      ] } },
+      CommonStockDividendsPerShareDeclared: { units: { 'USD/shares': [
+        annual(2021, 1), annual(2022, 1.1), annual(2023, 1.2), annual(2024, 1.3), annual(2025, 1.4),
+      ] } },
+    } },
+  };
+  const screen = screenRecommendationHistory(facts);
+  assert.equal(screen.publicAtLeastTenYears, true);
+  assert.equal(screen.revenueStressPassed, true);
+  assert.equal(screen.dividendGrowthPassed, true);
+});
+
+check('one dividend cut fails the recommendation screen', () => {
+  const annual = (year: number, val: number): XbrlFact => ({
+    start: `${year - 1}-01-01`, end: `${year}-01-01`, val, fy: year, fp: 'FY', form: '10-K',
+  });
+  const facts: CompanyFacts = { entityName: 'Dividend Cutter', facts: { 'us-gaap': {
+    Revenues: { units: { USD: [annual(2010, 100), annual(2014, 120), annual(2015, 125), annual(2019, 150), annual(2020, 151), annual(2025, 190)] } },
+    CommonStockDividendsPerShareDeclared: { units: { 'USD/shares': [annual(2021, 1), annual(2022, 1.1), annual(2023, 0.8), annual(2024, 0.9), annual(2025, 1)] } },
+  } } };
+  assert.equal(screenRecommendationHistory(facts).dividendGrowthPassed, false);
 });
 
 console.log('');
