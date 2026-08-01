@@ -292,7 +292,7 @@ export function capitalizeRnd(
 export function reorganize(
   companyName: string,
   f: StatementFacts,
-  opts: { marginalTaxRate: number; cashFallback?: number | null }
+  opts: { marginalTaxRate: number; cashFallback?: number | null; debtFallback?: number | null }
 ): ReorganizedInputs {
   const adjustments: Adjustment[] = [];
 
@@ -407,6 +407,14 @@ export function reorganize(
     debtEquivalentsBuild.push({ label: 'Unfunded pension and retirement obligations', value: f.pensionObligations, note: 'Ch. 19' });
   }
   const debtEquivalents = debtEquivalentsBuild.reduce((s, l) => s + l.value, 0);
+  // StockAnalysis's standardized Total Debt includes the current and long-term
+  // lease rows (SAP is an observable example). Once leases are shown as debt
+  // equivalents, remove them from financing debt to avoid a double deduction.
+  const reportedDebt = f.totalDebt ?? opts.debtFallback ?? null;
+  const totalDebt =
+    reportedDebt !== null && f.source === 'stockanalysis' && leaseLiability !== null
+      ? Math.max(reportedDebt - leaseLiability, 0)
+      : reportedDebt;
 
   adjustments.push(
     f.pensionObligations !== null && f.pensionObligations > 0
@@ -542,7 +550,7 @@ export function reorganize(
     excessCash,
     nonoperatingAssets,
     debtEquivalents,
-    totalDebt: f.totalDebt,
+    totalDebt,
     minorityInterest: f.minorityInterest,
     depreciationAmortization: f.depreciationAmortization,
     capex: f.capex,

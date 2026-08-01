@@ -283,8 +283,13 @@ export async function saOverview(listing: SaListing): Promise<SaOverview | null>
   const ebit = firstNum(ri?.data?.opinc);
   const netIncome = firstNum(ri?.data?.netinccmn);
   const pretaxMargin = firstNum(mg?.data?.pretaxMargin);
-  const totalDebt = firstNum(cd?.data?.debt);
-  const cashAndInvestments = firstNum(cd?.data?.cashAndInvestments);
+  const totalDebt = firstNum(cd?.data?.debt) ?? firstNum(cd?.data?.totalDebt);
+  const netCash = firstNum(cd?.data?.netcash);
+  const cashAndInvestments =
+    firstNum(cd?.data?.cashAndInvestments) ??
+    firstNum(cd?.data?.cashAndStInvest) ??
+    firstNum(cd?.data?.totalCashAndInvestments) ??
+    (totalDebt !== null && netCash !== null ? totalDebt + netCash : null);
   const capex = firstNum(cfc?.data?.capex);
   const fiscalYearEnd = Array.isArray(ri?.data?.datekey) ? String(ri.data.datekey[0] ?? 'unknown') : 'unknown';
 

@@ -226,6 +226,7 @@ export async function POST(req: NextRequest) {
     reorg = reorganize(companyTitle, facts, {
       marginalTaxRate: DEFAULT_MARGINAL_TAX_RATE,
       cashFallback: secExtract.cashAndEquivalents,
+      debtFallback: secExtract.totalDebt,
     });
   }
 
@@ -261,6 +262,15 @@ export async function POST(req: NextRequest) {
       'estimated'
     );
     estimatedFields.push('cashAndEquivalents (not found; treated as zero)');
+  }
+
+  if (facts?.totalDebt !== null && facts?.totalDebt !== undefined) {
+    log.add('Reported financing debt', fmtMoney(facts.totalDebt, currency), 'latest balance-sheet total debt', 'source');
+  } else if (secExtract.totalDebt !== null) {
+    log.add('Reported financing debt', fmtMoney(secExtract.totalDebt, currency), 'summary-page total debt used because the detailed balance-sheet key did not resolve', 'estimated');
+  } else {
+    log.add('Reported financing debt', fmtMoney(0, currency), 'no debt balance resolved from either source; zero is a missing-data fallback, not a confirmed debt-free balance sheet', 'estimated');
+    estimatedFields.push('totalDebt (not found; treated as zero)');
   }
 
   // 3. Fill remaining market-data gaps from fundamentals and user overrides;

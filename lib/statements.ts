@@ -188,6 +188,8 @@ const A = {
   cash: [
     'cashAndEquivalents',
     'cashAndCashEquivalents',
+    'cashAndEq',
+    'cashnequivalents',
     'cashEquivalents',
     'totalcash',
     'cashOnHand',
@@ -197,11 +199,12 @@ const A = {
   // short-term investments, so the caller nets them out to avoid double count.
   cashAndInvestments: [
     'cashAndInvestments',
+    'cashAndStInvest',
     'totalCashAndInvestments',
     'cashAndShortTermInvestments',
     'totalCashAndShortTermInvestments',
   ],
-  shortTermInvestments: ['shortTermInvestments', 'stInvestments', 'marketableSecurities'],
+  shortTermInvestments: ['shortTermInvestments', 'stInvestments', 'investmentsCurrent', 'marketableSecurities'],
   longTermInvestments: ['longTermInvestments', 'ltInvestments', 'investments'],
   equityInvestments: ['equityInvestments', 'investmentsInAffiliates', 'equityMethodInvestments'],
   totalDebt: ['debt', 'totalDebt'],
@@ -216,6 +219,8 @@ const A = {
     'capitalLeaseObligations',
     'operatingLeases',
   ],
+  currentLeaseLiabilities: ['currentPortionOfLeases', 'currentLeaseLiabilities', 'leasesCurrent'],
+  longTermLeaseLiabilities: ['longTermLeases', 'longTermLeaseLiabilities', 'leasesNonCurrent'],
   operatingLeaseAssets: ['operatingLeaseAssets', 'rightOfUseAssets', 'operatingLeaseRightOfUseAsset'],
   pensionObligations: ['pensionObligations', 'pensions', 'retirementBenefitObligations', 'pensionLiabilities'],
   deferredTaxLiabilities: ['deferredTaxLiabilities', 'deferredIncomeTaxes', 'deferredTaxes'],
@@ -415,6 +420,11 @@ export async function saStatementFacts(listing: SaListing): Promise<StatementFac
     if (sd !== null || ld !== null) f.totalDebt = (sd ?? 0) + (ld ?? 0);
   }
   f.operatingLeaseLiabilities = latestIncludingTtm(bs, A.operatingLeaseLiabilities);
+  if (f.operatingLeaseLiabilities === null) {
+    const currentLease = latestIncludingTtm(bs, A.currentLeaseLiabilities);
+    const longLease = latestIncludingTtm(bs, A.longTermLeaseLiabilities);
+    if (currentLease !== null || longLease !== null) f.operatingLeaseLiabilities = (currentLease ?? 0) + (longLease ?? 0);
+  }
   f.operatingLeaseAssets = latestIncludingTtm(bs, A.operatingLeaseAssets);
   f.pensionObligations = latestIncludingTtm(bs, A.pensionObligations);
   f.deferredTaxLiabilities = latestIncludingTtm(bs, A.deferredTaxLiabilities);

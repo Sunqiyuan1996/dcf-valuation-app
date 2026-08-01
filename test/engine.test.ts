@@ -749,6 +749,30 @@ check('tag order still decides when two tags cover the same period', () => {
   assert.equal(f.totalDebt, 100);
 });
 
+check('StockAnalysis total debt is split from leases without double counting', () => {
+  const f = factsFromEdgar({});
+  f.source = 'stockanalysis';
+  f.revenue = 1000;
+  f.ebit = 150;
+  f.netPPE = 500;
+  f.totalDebt = 300; // standardized total includes the 80 lease liability
+  f.operatingLeaseLiabilities = 80;
+  const r = reorganize('International Software', f, { marginalTaxRate: 0.25 });
+  assert.equal(r.totalDebt, 220);
+  assert.equal(r.debtEquivalents, 80);
+  assert.equal((r.totalDebt ?? 0) + r.debtEquivalents, 300);
+});
+
+check('summary debt fills a missing detailed statement balance', () => {
+  const f = factsFromEdgar({});
+  f.source = 'stockanalysis';
+  f.revenue = 1000;
+  f.ebit = 150;
+  f.netPPE = 500;
+  const r = reorganize('International Software', f, { marginalTaxRate: 0.25, debtFallback: 300 });
+  assert.equal(r.totalDebt, 300);
+});
+
 console.log('recommendation history screen');
 
 check('the screen requires stress resilience, a decade public, and five non-declining dividends', () => {

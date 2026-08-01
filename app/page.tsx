@@ -974,9 +974,10 @@ function Results({
         chapter="Ch. 9 and Part 3"
         subtitle="How the reported balance sheet was split into invested capital, nonoperating assets and debt equivalents before anything was discounted."
       >
-        <div className="grid gap-6 sm:grid-cols-3">
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
           <Build title="Invested capital" items={reorg.investedCapitalBuild} currency={c} />
           <Build title="Nonoperating assets" items={reorg.nonoperatingAssetsBuild} currency={c} />
+          <Build title="Financing debt" items={[{ label: 'Reported borrowings and leases', value: f.totalDebt, note: 'deducted in the equity bridge' }]} currency={c} />
           <Build title="Debt equivalents" items={reorg.debtEquivalentsBuild} currency={c} />
         </div>
       </Panel>
