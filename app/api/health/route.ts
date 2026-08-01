@@ -6,7 +6,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { resolveTickerToCik, fetchCompanyFacts, edgarStatementFacts } from '@/lib/secEdgar';
 import { probeStatements, saStatementFacts, StatementFacts } from '@/lib/statements';
 import { detectFinancial } from '@/lib/adjustments';
-import { fetchRiskFreeRate } from '@/lib/yahooFinance';
+import { fetchGovernmentBondYield } from '@/lib/yahooFinance';
 import {
   classifyTicker,
   saResolve,
@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
     ticker,
     classification: cls,
     twelveDataKeySet: Boolean(process.env.TWELVE_DATA_KEY),
-    fred10y: await fetchRiskFreeRate(),
+    sovereign10y: await fetchGovernmentBondYield(cls?.suffix ?? 'US'),
   };
 
   // Whether a filer is read as a bank or insurer decides which of the two

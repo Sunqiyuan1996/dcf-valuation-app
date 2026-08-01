@@ -6,7 +6,7 @@ import {
   edgarStatementFacts,
   SecExtract,
 } from '@/lib/secEdgar';
-import { fetchRiskFreeRate } from '@/lib/yahooFinance';
+import { fetchGovernmentBondYield } from '@/lib/yahooFinance';
 import {
   classifyTicker,
   saResolve,
@@ -275,16 +275,19 @@ export async function POST(req: NextRequest) {
     quote.marketCap = quote.price * quote.sharesOutstanding;
   }
 
-  const usTenYear = await fetchRiskFreeRate();
-  if (usTenYear === null) estimatedFields.push('riskFreeRate (US 10-year unavailable)');
-  const riskFreeRate = localRiskFreeRate(usTenYear ?? DEFAULT_RISK_FREE_RATE, market);
+  const sovereign = await fetchGovernmentBondYield(cls?.suffix ?? 'US');
+  if (sovereign.rate === null) estimatedFields.push(`riskFreeRate (${market.name} 10-year unavailable)`);
+  // The old US-yield-plus-spread rule survives only as a disclosed outage
+  // fallback. The normal path uses the country's sovereign yield directly.
+  const fallbackUs = sovereign.rate === null ? await fetchGovernmentBondYield('US') : null;
+  const riskFreeRate = sovereign.rate ?? localRiskFreeRate(fallbackUs?.rate ?? DEFAULT_RISK_FREE_RATE, market);
   log.add(
-    'US 10-year Treasury',
-    fmtPct(usTenYear ?? DEFAULT_RISK_FREE_RATE),
-    usTenYear === null
-      ? `FRED unavailable; ${fmtPct(DEFAULT_RISK_FREE_RATE)} fallback used. This is the input to the local risk-free rate below, not the rate the cash flows are discounted at.`
-      : 'FRED series DGS10. This is the input to the local risk-free rate below, not the rate the cash flows are discounted at.',
-    usTenYear === null ? 'default' : 'source'
+    `${market.name} 10-year government bond`,
+    fmtPct(riskFreeRate),
+    sovereign.rate === null
+      ? `${market.name} sovereign series unavailable; temporary US Treasury plus disclosed market-spread fallback used.`
+      : `FRED series ${sovereign.series}, sourced from the OECD long-term 10-year benchmark yield. This is the risk-free rate used in the valuation.`,
+    sovereign.rate === null ? 'estimated' : 'source'
   );
 
   // 4. Resolve each valuation input: reorganized balance sheet first, then the
@@ -552,7 +555,12 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const dataQuality = appendDerivedRows(log, financials, assumptions, facts, result.wacc, betaEstimate);
+  const dataQuality = appendDerivedRows(log, financials, assumptions, facts, result.wacc, betaEstimate, {
+    basis: sovereign.rate === null
+      ? `${market.name} sovereign yield was unavailable; temporary US Treasury plus market-spread fallback (Ch. 13)`
+      : `${market.name} 10-year government bond yield from FRED/OECD series ${sovereign.series}; same-currency rate used to discount the cash flows (Ch. 13)`,
+    confidence: sovereign.rate === null ? 'estimated' : 'source',
+  });
 
   return NextResponse.json({ financials, assumptions, result, reorganization, dataQuality, equityValuation });
 }

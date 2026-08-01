@@ -67,7 +67,8 @@ export function appendDerivedRows(
   a: DcfAssumptions,
   facts: StatementFacts | null,
   wacc: number,
-  betaEstimate: BetaEstimate | null = null
+  betaEstimate: BetaEstimate | null = null,
+  riskFreeProvenance?: { basis: string; confidence: Confidence }
 ): DataQualityRow[] {
   const c = f.currency;
   const src: Confidence = facts === null ? 'estimated' : 'source';
@@ -113,8 +114,8 @@ export function appendDerivedRows(
   log.set(
     'Risk-free rate used',
     fmtPct(a.riskFreeRate),
-    `${f.marketName} local-currency rate, and the rate the cash flows are actually discounted at: the US 10-year Treasury above plus a static market spread (Ch. 13)`,
-    'estimated'
+    riskFreeProvenance?.basis ?? `${f.marketName} 10-year government bond yield; same-currency rate used to discount the cash flows (Ch. 13)`,
+    riskFreeProvenance?.confidence ?? 'source'
   );
   log.set('Equity risk premium', fmtPct(a.equityRiskPremium), 'mature-market premium; Koller Ch. 13 argues for a 5-6% range', 'default');
   if (a.countryRiskPremium > 0) {
