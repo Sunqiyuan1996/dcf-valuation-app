@@ -150,6 +150,39 @@ export async function POST(req: NextRequest) {
       facts = edgarStatementFacts(companyFacts);
       quote.price = (await saPrice(symbol.toLowerCase())) ?? (await twelveDataPrice(symbol));
       log.add('Share price', String(quote.price ?? 'n/a'), 'stockanalysis.com quote', 'source');
+      // Foreign private issuers trade in the US but commonly file IFRS facts,
+      // which the US-GAAP EDGAR extractor cannot interpret. StockAnalysis uses
+      // the same bare US path, so use it as a disclosed fallback only when the
+      // official extract lacks the operating statement or share count.
+      if (secExtract.revenue === null || secExtract.ebit === null || secExtract.sharesOutstanding === null) {
+        const usListing: SaListing = {
+          path: symbol.toLowerCase(),
+          name: companyTitle,
+          exchangeMatched: true,
+          foundOn: ['us'],
+        };
+        const [saOv, saFacts] = await Promise.all([saOverview(usListing), saStatementFacts(usListing)]);
+        if (saOv?.fundamentals) {
+          const official = secExtract;
+          const fallback = saOv.fundamentals;
+          secExtract = {
+            ...fallback,
+            ...Object.fromEntries(Object.entries(official).map(([k, v]) => [k, v ?? (fallback as any)[k]])),
+            missing: Array.from(new Set([...official.missing, ...fallback.missing])),
+          } as SecExtract;
+          facts = facts.revenue !== null && facts.ebit !== null ? facts : saFacts;
+          quote.price ??= saOv.price;
+          quote.sharesOutstanding = secExtract.sharesOutstanding ?? saOv.sharesOutstanding;
+          currency = saOv.financialCurrency ?? currency;
+          estimatedFields.push('US foreign-issuer fundamentals (StockAnalysis fallback)');
+          log.add(
+            'Financial statement source',
+            'StockAnalysis fallback',
+            'SEC EDGAR did not expose a complete US-GAAP statement for this US-listed foreign issuer; StockAnalysis statement data filled the missing fields',
+            'estimated'
+          );
+        }
+      }
     } else if (cls.market === 'CN-A') {
       isInternational = true;
       const [cn, resolvedListing] = await Promise.all([

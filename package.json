@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "tsc -p tsconfig.test.json && node .test-build/test/engine.test.js"
+    "test": "tsc -p tsconfig.test.json && node .test-build/test/engine.test.js",
+    "test:ui": "node test/http-smoke.mjs",
+    "test:live": "node test/live-sources.mjs"
   },
   "dependencies": {
     "next": "14.2.35",

@@ -11,6 +11,7 @@ import { Cell } from '../lib/xlsx';
 import { CompanyFacts, XbrlFact, edgarStatementFacts, extractFinancials, screenRecommendationHistory } from '../lib/secEdgar';
 import { Financials } from '../lib/types';
 import { latestBusinessDate } from '../lib/businessDate';
+import { numericSeriesValues } from '../lib/globalData';
 
 let failures = 0;
 function check(name: string, fn: () => void) {
@@ -23,6 +24,14 @@ function check(name: string, fn: () => void) {
   }
 }
 const close = (a: number, b: number, tol = 1e-6) => Math.abs(a - b) <= tol * Math.max(1, Math.abs(b));
+
+check('StockAnalysis series accept bare and metadata-wrapped field shapes', () => {
+  assert.deepEqual(numericSeriesValues([3, 2, 1]), [3, 2, 1]);
+  assert.deepEqual(numericSeriesValues({ data: [3, 2, 1], label: 'Cash' }), [3, 2, 1]);
+  assert.deepEqual(numericSeriesValues({ values: [3, 2, 1] }), [3, 2, 1]);
+  assert.deepEqual(numericSeriesValues({ annual: [3, 2, 1] }), [3, 2, 1]);
+  assert.deepEqual(numericSeriesValues({ unrelated: [3, 2, 1] }), []);
+});
 
 // A profitable, moderately levered industrial. ROIC = 150*0.75/1000 = 11.25%.
 function base(): Financials {

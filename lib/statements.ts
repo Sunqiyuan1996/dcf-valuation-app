@@ -10,7 +10,7 @@
 // taxes) are applied only when their inputs are present, and are otherwise
 // skipped and reported in the data-quality panel rather than guessed.
 
-import { decodeDevalueNode, SaListing } from './globalData';
+import { decodeDevalueNode, numericSeriesValues, SaListing } from './globalData';
 
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
@@ -76,10 +76,13 @@ export async function fetchStatementTable(
     if (!raw) continue;
 
     const fields: Record<string, unknown[]> = {};
-    for (const [k, v] of Object.entries(raw)) if (Array.isArray(v)) fields[k] = v;
+    for (const [k, v] of Object.entries(raw)) {
+      const series = numericSeriesValues(v);
+      if (series.length > 0) fields[k] = series;
+    }
     if (Object.keys(fields).length === 0) continue;
 
-    const periodsRaw = fields['datekey'] ?? fields['period'] ?? [];
+    const periodsRaw = fields['datekey'] ?? fields['period'] ?? fields['fiscalYear'] ?? fields['date'] ?? [];
     const periods = periodsRaw.map((p) => (p === null || p === undefined ? '' : String(p)));
     const leadingTtm = periods.length > 0 && !looksLikeFiscalPeriod(periods[0]);
     return { fields, periods, leadingTtm };

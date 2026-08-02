@@ -55,6 +55,9 @@ export async function GET(req: NextRequest) {
       report.edgar = resolved;
       report.saPrice = await saPrice(symbol.toLowerCase());
       report.twelveDataPrice = await twelveDataPrice(symbol);
+      const usListing = { path: symbol.toLowerCase(), name: resolved?.title ?? symbol, exchangeMatched: true, foundOn: ['us'] };
+      report.saOverview = await saOverview(usListing);
+      report.saStatements = await probeStatements(usListing);
       if (resolved) {
         report.detection = detection(resolved.title, edgarStatementFacts(await fetchCompanyFacts(resolved.cik)));
       }

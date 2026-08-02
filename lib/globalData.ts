@@ -219,9 +219,21 @@ export interface SaOverview {
 }
 
 /** First finite number in an array (columns are most-recent-first). */
+export function numericSeriesValues(row: unknown): unknown[] {
+  if (Array.isArray(row)) return row;
+  if (!row || typeof row !== 'object') return [];
+  const value = row as Record<string, unknown>;
+  // StockAnalysis has used both bare arrays and metadata wrappers across its
+  // Svelte payloads. Keep this deliberately small and observable rather than
+  // recursively accepting arbitrary objects as financial data.
+  for (const key of ['data', 'values', 'annual', 'series']) {
+    if (Array.isArray(value[key])) return value[key] as unknown[];
+  }
+  return [];
+}
+
 function firstNum(row: unknown): number | null {
-  if (!Array.isArray(row)) return null;
-  for (const v of row) if (typeof v === 'number' && isFinite(v)) return v;
+  for (const v of numericSeriesValues(row)) if (typeof v === 'number' && isFinite(v)) return v;
   return null;
 }
 
@@ -291,7 +303,8 @@ export async function saOverview(listing: SaListing): Promise<SaOverview | null>
     firstNum(cd?.data?.totalCashAndInvestments) ??
     (totalDebt !== null && netCash !== null ? totalDebt + netCash : null);
   const capex = firstNum(cfc?.data?.capex);
-  const fiscalYearEnd = Array.isArray(ri?.data?.datekey) ? String(ri.data.datekey[0] ?? 'unknown') : 'unknown';
+  const dates = numericSeriesValues(ri?.data?.datekey ?? ri?.data?.period ?? ri?.data?.fiscalYear);
+  const fiscalYearEnd = String(dates[0] ?? 'unknown');
 
   // Effective tax rate from pretax margin: pretax income = margin x revenue.
   // (Slightly overstates the rate when minority interest is large, since
@@ -316,6 +329,19 @@ export async function saOverview(listing: SaListing): Promise<SaOverview | null>
       }
     }
   }
+  // Newer payloads expose shares or market cap directly. These are preferable
+  // to sending a zero-net-cash company to manual entry because nc / ncps is
+  // mathematically unavailable there.
+  sharesOutstanding ??=
+    num(info?.quote?.sharesOutstanding) ??
+    num(info?.quote?.shares) ??
+    num(info?.quote?.so) ??
+    firstNum(va?.data?.sharesOutstanding) ??
+    firstNum(va?.data?.sharesOut);
+  const quotedMarketCap = num(info?.quote?.marketCap) ?? num(info?.quote?.mc);
+  if (sharesOutstanding === null && quotedMarketCap !== null && rawPrice !== null) {
+    sharesOutstanding = quotedMarketCap / rawPrice;
+  }
 
   // Price in financial-statement currency. When the quote currency differs
   // (e.g. HK: price HKD, financials CNY), SA's TTM PE is computed against the
@@ -334,9 +360,8 @@ export async function saOverview(listing: SaListing): Promise<SaOverview | null>
   const marketCap = price !== null && sharesOutstanding !== null ? price * sharesOutstanding : null;
 
   let revenueCagr3y: number | null = null;
-  const revSeries = Array.isArray(ri?.data?.revenue)
-    ? (ri.data.revenue as unknown[]).filter((v): v is number => typeof v === 'number' && isFinite(v))
-    : [];
+  const revSeries = numericSeriesValues(ri?.data?.revenue)
+    .filter((v): v is number => typeof v === 'number' && isFinite(v));
   const n = Math.min(revSeries.length - 1, 3);
   if (n >= 1 && revSeries[n] > 0) revenueCagr3y = Math.pow(revSeries[0] / revSeries[n], 1 / n) - 1;
 
