@@ -28,5 +28,5 @@ export function Headline({ label, value, accent, tone }: { label: string; value:
 
 export function Tile({ label, value, sub, tone }: { label: string; value: string; sub: string; tone?: 'good' | 'bad' | 'warn' }) {
   const border = tone === 'good' ? 'border-l-positive' : tone === 'bad' ? 'border-l-negative' : tone === 'warn' ? 'border-l-warn' : 'border-l-slate-300';
-  return <div className={`rounded-xl border border-slate-200 border-l-4 bg-white px-4 py-3 shadow-sm ${border}`}><div className="text-[11px] uppercase tracking-wide text-slate-400">{label}</div><div className="mt-0.5 text-xl font-semibold tabular-nums">{value}</div><div className="text-[11px] text-slate-500">{sub}</div></div>;
+  return <div className={`rounded-xl border border-slate-200 border-l-4 bg-slate-50 px-4 py-3 ${border}`}><div className="text-[11px] uppercase tracking-wide text-slate-400">{label}</div><div className="mt-0.5 text-xl font-semibold tabular-nums">{value}</div><div className="text-[11px] text-slate-500">{sub}</div></div>;
 }

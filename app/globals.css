@@ -11,3 +11,23 @@ body {
 }
 
 ::selection { background: #a7f3d0; color: #0f172a; }
+
+:where(button, input, summary, a):focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(14, 116, 144, 0.35);
+}
+
+.sticky-first-column th:first-child,
+.sticky-first-column td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 10;
+  background: #fff;
+  box-shadow: 1px 0 0 #e2e8f0;
+}
+
+.sticky-first-column thead th:first-child { z-index: 20; }
+
+.heat-legend {
+  background: linear-gradient(90deg, #dcfce7 0%, #f8fafc 50%, #fee2e2 100%);
+}

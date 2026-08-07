@@ -18,6 +18,8 @@ The beta estimator uses a raw market beta when available. Otherwise it starts fr
 
 The data-quality panel names the source and confidence of every important figure. Missing accounting adjustments are shown as skipped with a reason. Cash provenance includes the source field, balance-sheet date, and whether the observation is interim. The app never silently substitutes a different exchange listing.
 
+The results workspace is organized into four navigable tiers: Valuation, Diagnostics, Assumptions, and Data & sources. Diagnostic exhibits are collapsible, assumptions are grouped by decision type, and wide analytical tables retain their row labels while scrolling on smaller screens.
+
 Use `/api/health?ticker=...` to inspect resolution, overview fields, statement keys, cash aliases, financial-institution detection, and source failures.
 
 ## Tickers and currencies

@@ -23,7 +23,7 @@ import {
   Waterfall,
   heatStyle,
 } from './charts';
-import { Card, Headline, Panel, Tile } from './components/ui';
+import { Headline, Panel, Tile } from './components/ui';
 
 interface ApiSuccess {
   financials: Financials;
@@ -176,13 +176,17 @@ export default function Home() {
                 : 'Enterprise DCF on the McKinsey value-driver framework'}
             </div>
           </div>
-          <input
-            value={ticker}
-            onChange={(e) => setTicker(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && ticker && runValuation()}
-            placeholder="AAPL · 600519.SS · 0700.HK · SAP.DE · 7203.JP"
-            className="w-72 rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-accent focus:outline-none"
-          />
+          <label className="w-72">
+            <span className="mb-1 block text-[11px] font-medium uppercase tracking-[0.04em] text-slate-400">Ticker</span>
+            <input
+              aria-label="Ticker symbol"
+              value={ticker}
+              onChange={(e) => setTicker(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && ticker && runValuation()}
+              placeholder="AAPL · NVO · NOVO-B.CO"
+              className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-accent focus:outline-none"
+            />
+          </label>
           <button
             onClick={() => runValuation()}
             disabled={loading || !ticker}
@@ -350,6 +354,23 @@ function Results({
   const m = (n: number, compact = true) => money(n, c, compact);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [activeSection, setActiveSection] = useState('valuation');
+
+  useEffect(() => {
+    const ids = ['valuation', 'diagnostics', 'assumptions', 'data-sources'];
+    const elements = ids.map((id) => document.getElementById(id)).filter((el): el is HTMLElement => el !== null);
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+        if (visible?.target.id) setActiveSection(visible.target.id);
+      },
+      { rootMargin: '-25% 0px -65% 0px' }
+    );
+    elements.forEach((element) => observer.observe(element));
+    return () => observer.disconnect();
+  }, [f.ticker]);
 
   const softRows = dataQuality.filter((row) => row.confidence === 'estimated' || row.confidence === 'default');
   const cashRow = dataQuality.find((row) => row.field === 'Cash and equivalents');
@@ -437,14 +458,22 @@ function Results({
     }
   }
 
-  function field(key: keyof DcfAssumptions, label: string, kind: 'pct' | 'num' = 'pct') {
+  function field(
+    key: keyof DcfAssumptions,
+    label: string,
+    kind: 'pct' | 'num' = 'pct',
+    enterpriseOnly = false
+  ) {
     const raw = assumptionDraft[key];
     const numeric = typeof raw === 'number' ? raw : 0;
     const shown = kind === 'pct' ? Number((numeric * 100).toFixed(2)) : numeric;
     return (
-      <label key={key} className="block">
-        <span className="text-[11px] text-slate-500">{label}</span>
-        <span className="mt-1 flex items-center rounded-md border border-slate-300 bg-white focus-within:border-accent">
+      <label key={key} className="flex items-center justify-between gap-3">
+        <span className="flex items-center gap-1.5 text-xs text-slate-600">
+          {enterpriseOnly && eq ? <span className="h-1.5 w-1.5 rounded-full bg-warn" aria-hidden="true" /> : null}
+          {label}
+        </span>
+        <span className="flex w-24 shrink-0 items-center rounded-md border border-slate-300 bg-white focus-within:border-accent">
           <input
             type="number"
             step={kind === 'pct' ? 0.1 : 1}
@@ -454,7 +483,7 @@ function Results({
               if (Number.isNaN(v)) return;
               setAssumptionDraft({ ...assumptionDraft, [key]: kind === 'pct' ? v / 100 : v });
             }}
-            className="w-full rounded-md px-2 py-1.5 text-sm tabular-nums focus:outline-none"
+            className="w-full rounded-md px-2 py-1.5 text-right text-sm tabular-nums focus:outline-none"
           />
           {kind === 'pct' && <span className="pr-2 text-xs text-slate-400">%</span>}
         </span>
@@ -465,7 +494,28 @@ function Results({
   const maxFcf = Math.max(...r.forecast.map((y) => Math.abs(y.freeCashFlow)).filter(Number.isFinite), 1);
 
   return (
-    <div className="space-y-5">
+    <div className="lg:grid lg:grid-cols-[180px_minmax(0,1fr)] lg:items-start lg:gap-5">
+      <aside className="z-10 mb-4 overflow-x-auto rounded-xl border border-slate-200 bg-white/95 p-2 shadow-sm backdrop-blur lg:sticky lg:top-[84px] lg:mb-0 lg:overflow-visible">
+        <nav aria-label="Valuation result sections" className="flex min-w-max gap-1 lg:min-w-0 lg:flex-col">
+          {[
+            ['valuation', 'Valuation'],
+            ['diagnostics', 'Diagnostics'],
+            ['assumptions', 'Assumptions'],
+            ['data-sources', 'Data & sources'],
+          ].map(([id, label]) => (
+            <a
+              key={id}
+              href={`#${id}`}
+              className={`rounded-lg px-3 py-2 text-xs font-medium transition hover:bg-slate-100 hover:text-ink ${
+                activeSection === id ? 'bg-ink text-white hover:bg-ink hover:text-white' : 'text-slate-600'
+              }`}
+            >
+              {label}
+            </a>
+          ))}
+        </nav>
+      </aside>
+      <div className="min-w-0 space-y-5">
       {f.isFinancial && eq && (
         <div className="rounded-xl border-l-4 border-accent bg-sky-50 p-5 text-sm text-sky-900">
           <p className="font-semibold">Valued as a financial institution, using equity cash flow.</p>
@@ -494,7 +544,7 @@ function Results({
       )}
 
       {/* Hero */}
-      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <section id="valuation" className="scroll-mt-28 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 px-6 py-5">
           <div>
             <h2 className="text-xl font-semibold tracking-tight">
@@ -558,6 +608,7 @@ function Results({
         </div>
       </section>
 
+      <div id="diagnostics" className="h-px scroll-mt-28" aria-hidden="true" />
       {eq && <EquityModel eq={eq} currency={c} sharesOutstanding={f.sharesOutstanding} />}
 
       {!eq && (
@@ -590,7 +641,7 @@ function Results({
       </section>
 
       {/* Value driver tree */}
-      <Card title="What drives this valuation" chapter="Ch. 2 & 8 — value-driver tree">
+      <Panel title="What drives this valuation" chapter="Ch. 2 & 8 — value-driver tree" defaultOpen>
         <ValueDriverTree
           growth={assumptionDraft.stage1RevenueGrowth}
           ronic={assumptionDraft.stage1IncrementalRoic}
@@ -602,10 +653,10 @@ function Results({
           fairValuePerShare={r.fairValuePerShare}
           currency={c}
         />
-      </Card>
+      </Panel>
 
       {/* Where the value sits */}
-      <Card
+      <Panel
         title="Where the value comes from"
         chapter="Ch. 12 — continuing value"
         subtitle="The continuing value usually dominates a DCF, so its implied economics deserve a direct sanity check."
@@ -627,10 +678,10 @@ function Results({
             ))}
           </ul>
         )}
-      </Card>
+      </Panel>
 
       {/* Economic profit */}
-      <Card
+      <Panel
         title="Economic profit"
         chapter="Ch. 8 & 10 — the value creation behind the cash flow"
         subtitle="Economic profit is (ROIC − WACC) × invested capital. Invested capital plus its present value must reproduce the DCF enterprise value."
@@ -663,10 +714,10 @@ function Results({
             {fmtPct(Math.sqrt(1 + r.wacc) - 1)} of value. Nothing is missing between the two figures.
           </p>
         ) : null}
-      </Card>
+      </Panel>
 
       {/* Bridge */}
-      <Card
+      <Panel
         title="From enterprise value to value per share"
         chapter="Ch. 14 — the bridge"
         subtitle="Enterprise value becomes equity value only after debt and debt equivalents come out and excess cash and nonoperating assets go back in."
@@ -692,10 +743,10 @@ function Results({
             <span className="font-medium text-slate-600">Cash and equivalents {cashRow.value}</span> — {cashRow.basis}
           </p>
         )}
-      </Card>
+      </Panel>
 
       {/* Sensitivity */}
-      <Card
+      <Panel
         title="If the two big assumptions are wrong"
         chapter="Ch. 15 — sensitivity"
         subtitle={`Fair value per share across WACC and long-run growth. Shading is distance from the ${m(
@@ -703,8 +754,13 @@ function Results({
           false
         )} market price; the boxed cell is the base case, and the dashed cells trace what the market is pricing in.`}
       >
+        <div className="mb-3 flex items-center gap-2 text-[11px] text-slate-500" aria-label="Sensitivity shading legend">
+          <span>Cheaper</span>
+          <span className="heat-legend h-2.5 w-28 rounded-full border border-slate-200" aria-hidden="true" />
+          <span>Richer</span>
+        </div>
         <div className="overflow-x-auto">
-          <table className="text-xs tabular-nums">
+          <table className="sticky-first-column text-xs tabular-nums">
             <thead>
               <tr>
                 <th className="px-2 py-1 text-left font-medium text-slate-400">WACC ↓ / growth →</th>
@@ -776,12 +832,12 @@ function Results({
             Dashes are combinations where growth is too close to the WACC for the perpetuity formula to mean anything.
           </p>
         </div>
-      </Card>
+      </Panel>
 
       {/* Scenarios */}
       {r.scenarios && (
-        <Card title="Probability-weighted scenarios" chapter="Part 5 — high-growth companies" subtitle={r.scenarios.rationale}>
-          <table className="w-full text-xs">
+        <Panel title="Probability-weighted scenarios" chapter="Part 5 — high-growth companies" subtitle={r.scenarios.rationale}>
+          <table className="sticky-first-column w-full min-w-[620px] text-xs">
             <thead>
               <tr className="border-b border-slate-200 text-left text-slate-400">
                 <th className="py-1.5 pr-3 font-medium">Scenario</th>
@@ -809,12 +865,13 @@ function Results({
               </tr>
             </tbody>
           </table>
-        </Card>
+        </Panel>
       )}
         </>
       )}
 
       {/* Assumptions */}
+      <div id="assumptions" className="scroll-mt-28">
       <Panel
         title="Tune the assumptions"
         chapter="Ch. 11 & 13"
@@ -825,42 +882,83 @@ function Results({
         }
         badge={eq ? `Cost of equity ${fmtPct(eq.costOfEquity)}` : `WACC ${fmtPct(r.wacc)}`}
       >
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {field('riskFreeRate', 'Risk-free rate')}
-          {field('equityRiskPremium', 'Equity risk premium')}
-          {field('countryRiskPremium', 'Country risk premium')}
-          {field('beta', 'Beta', 'num')}
-          {field('preTaxCostOfDebt', 'Pre-tax cost of debt')}
-          {field('taxRate', 'Operating tax rate')}
-          {field('explicitYears', 'Explicit years', 'num')}
-          {field('fadeYears', 'Fade years', 'num')}
-          {field('stage1RevenueGrowth', 'Stage 1 revenue growth')}
-          {field('terminalGrowth', 'Long-run growth')}
-          {field('stage1IncrementalRoic', 'Stage 1 RONIC')}
-          {field('terminalIncrementalRoic', 'Terminal RONIC')}
+        <div className="grid divide-y divide-slate-100 lg:grid-cols-3 lg:divide-x lg:divide-y-0">
+          <section className="pb-5 lg:pr-5">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h4 className="text-[11px] font-semibold uppercase tracking-[0.04em] text-slate-400">Cost of capital</h4>
+              <span className="rounded bg-slate-100 px-2 py-1 text-[11px] font-medium tabular-nums text-slate-600">
+                {eq ? `Ke ${fmtPct(eq.costOfEquity)}` : `WACC ${fmtPct(r.wacc)}`}
+              </span>
+            </div>
+            <div className="space-y-3">
+              {field('riskFreeRate', 'Risk-free rate')}
+              {field('equityRiskPremium', 'Equity risk premium')}
+              {field('countryRiskPremium', 'Country risk premium')}
+              {field('beta', 'Beta', 'num')}
+              {field('preTaxCostOfDebt', 'Pre-tax cost of debt', 'pct', true)}
+            </div>
+            <p className="mt-4 border-t border-slate-100 pt-3 text-[11px] leading-relaxed text-slate-500">
+              Cost of equity {fmtPct(r.costOfEquity)} · after-tax debt {fmtPct(r.afterTaxCostOfDebt)}
+            </p>
+          </section>
+          <section className="py-5 lg:px-5 lg:py-0">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h4 className="text-[11px] font-semibold uppercase tracking-[0.04em] text-slate-400">Growth & returns</h4>
+              <span className="rounded bg-slate-100 px-2 py-1 text-[11px] font-medium tabular-nums text-slate-600">
+                g {fmtPct(assumptionDraft.stage1RevenueGrowth)}
+              </span>
+            </div>
+            <div className="space-y-3">
+              {field('stage1RevenueGrowth', 'Stage 1 revenue growth')}
+              {field('terminalGrowth', 'Long-run growth')}
+              {field('stage1IncrementalRoic', 'Stage 1 RONIC', 'pct', true)}
+              {field('terminalIncrementalRoic', 'Terminal RONIC', 'pct', true)}
+              {field('taxRate', 'Operating tax rate')}
+            </div>
+            <p className="mt-4 border-t border-slate-100 pt-3 text-[11px] leading-relaxed text-slate-500">
+              Long-run growth {fmtPct(assumptionDraft.terminalGrowth)} · terminal return {fmtPct(assumptionDraft.terminalIncrementalRoic)}
+            </p>
+          </section>
+          <section className="pt-5 lg:pl-5 lg:pt-0">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h4 className="text-[11px] font-semibold uppercase tracking-[0.04em] text-slate-400">Horizon</h4>
+              <span className="rounded bg-slate-100 px-2 py-1 text-[11px] font-medium tabular-nums text-slate-600">
+                {assumptionDraft.explicitYears + assumptionDraft.fadeYears} years
+              </span>
+            </div>
+            <div className="space-y-3">
+              {field('explicitYears', 'Explicit years', 'num')}
+              {field('fadeYears', 'Fade years', 'num')}
+            </div>
+            {eq ? (
+              <p className="mt-4 flex items-center gap-2 border-t border-slate-100 pt-3 text-[11px] leading-relaxed text-slate-500">
+                <span className="h-1.5 w-1.5 rounded-full bg-warn" aria-hidden="true" /> Enterprise-model only
+              </p>
+            ) : null}
+          </section>
         </div>
-        <div className="mt-4 flex items-center gap-4">
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-4 border-t border-slate-100 pt-4">
+          <span className="text-[11px] text-slate-500">
+            Weights {fmtPct(r.weightOfEquity, 0)} equity / {fmtPct(r.weightOfDebt, 0)} debt
+            {r.costOfDebtBasis ? ` · ${r.costOfDebtBasis}` : ''}
+          </span>
           <button
             onClick={onRecalculate}
             disabled={loading}
-            className="rounded-md bg-ink px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
+            className="rounded-md bg-ink px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-40"
           >
             {loading ? 'Recalculating…' : 'Recalculate'}
           </button>
-          <span className="text-[11px] text-slate-500">
-            Cost of equity {fmtPct(r.costOfEquity)} · after-tax cost of debt {fmtPct(r.afterTaxCostOfDebt)} · weights{' '}
-            {fmtPct(r.weightOfEquity, 0)} equity / {fmtPct(r.weightOfDebt, 0)} debt
-            {r.costOfDebtBasis ? ` · ${r.costOfDebtBasis}` : ''}
-          </span>
         </div>
       </Panel>
+      </div>
 
       {!eq && (
         <>
       {/* Forecast */}
       <Panel title="Forecast detail" chapter="Ch. 11" subtitle="Explicit period, then a fade to the long-run assumptions.">
         <div className="overflow-x-auto">
-          <table className="w-full text-xs">
+          <table className="sticky-first-column w-full min-w-[880px] text-xs">
             <thead>
               <tr className="border-b border-slate-200 text-left text-slate-400">
                 {['Year', 'Revenue', 'Growth', 'EBIT margin', 'NOPAT', 'Inv. capital', 'ROIC', 'Econ. profit', 'Reinvest.', 'FCF', 'PV(FCF)'].map(
@@ -921,6 +1019,7 @@ function Results({
       )}
 
       {/* Data quality */}
+      <div id="data-sources" className="scroll-mt-28">
       <Panel
         title="Data quality"
         chapter="Every input, with its source"
@@ -939,7 +1038,8 @@ function Results({
             column-width negotiation to the short nowrap value column, so Basis
             wrapped to a sliver and the Confidence badge was pushed past the right
             edge of the panel. */}
-        <table className="w-full table-fixed text-xs">
+        <div className="overflow-x-auto">
+        <table className="sticky-first-column w-full min-w-[760px] table-fixed text-xs">
           <colgroup>
             <col className="w-[16%]" />
             <col className="w-[14%]" />
@@ -969,7 +1069,9 @@ function Results({
             ))}
           </tbody>
         </table>
+        </div>
       </Panel>
+      </div>
 
       {!eq && (
         <>
@@ -1038,6 +1140,7 @@ function Results({
       </Panel>
         </>
       )}
+      </div>
     </div>
   );
 }
@@ -1101,13 +1204,14 @@ function EquityModel({
         </ul>
       )}
 
-      <Card
+      <Panel
         title="Equity cash flow"
         chapter="Part 5 — valuing banks"
         subtitle="A bank's growth is constrained by regulatory capital: to grow the balance sheet by g, book equity has to grow by g too. What is left of net income after that reinvestment is what shareholders can actually take out, and it is discounted at the cost of equity rather than the WACC. There is no bridge, because there is no enterprise value to bridge from."
+        defaultOpen
       >
         <div className="overflow-x-auto">
-          <table className="w-full text-xs">
+          <table className="sticky-first-column w-full min-w-[720px] text-xs">
             <thead>
               <tr className="border-b border-slate-200 text-left text-slate-400">
                 {[
@@ -1175,9 +1279,9 @@ function EquityModel({
           is dominated by dividends and capital actions that fall at period ends — and because it makes that book-value
           identity hold exactly, which is a useful audit.
         </p>
-      </Card>
+      </Panel>
 
-      <Card
+      <Panel
         title="If the two big assumptions are wrong"
         chapter="Ch. 15 — sensitivity"
         subtitle={`Fair value per share across the cost of equity and long-run growth. Shading is distance from the ${money(
@@ -1186,8 +1290,13 @@ function EquityModel({
           false
         )} market price; the boxed cell is the base case.`}
       >
+        <div className="mb-3 flex items-center gap-2 text-[11px] text-slate-500" aria-label="Sensitivity shading legend">
+          <span>Cheaper</span>
+          <span className="heat-legend h-2.5 w-28 rounded-full border border-slate-200" aria-hidden="true" />
+          <span>Richer</span>
+        </div>
         <div className="overflow-x-auto">
-          <table className="text-xs tabular-nums">
+          <table className="sticky-first-column text-xs tabular-nums">
             <thead>
               <tr>
                 <th className="px-2 py-1 text-left font-medium text-slate-400">Cost of equity ↓ / growth →</th>
@@ -1221,7 +1330,7 @@ function EquityModel({
             </tbody>
           </table>
         </div>
-      </Card>
+      </Panel>
     </>
   );
 }
