@@ -1,5 +1,7 @@
 // Core data and assumption types shared across the fetch layer, DCF engine, and UI.
 
+export type AccountingFramework = 'us-gaap' | 'ifrs' | 'unknown';
+
 export interface Financials {
   ticker: string;
   companyName: string;
@@ -110,6 +112,9 @@ export interface Adjustment {
 }
 
 export interface Reorganization {
+  accountingFramework: AccountingFramework;
+  accountingFrameworkBasis: string;
+  reconciliationStatus: 'complete' | 'partial' | 'unresolved';
   investedCapitalBuild: LineItem[];
   nonoperatingAssetsBuild: LineItem[];
   debtEquivalentsBuild: LineItem[];

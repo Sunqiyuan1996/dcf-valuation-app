@@ -22,7 +22,7 @@
 // with a reason, so the UI can disclose it instead of the engine guessing.
 
 import { StatementFacts } from './statements';
-import { Adjustment, LineItem, Reorganization } from './types';
+import { AccountingFramework, Adjustment, LineItem, Reorganization } from './types';
 
 /** Cash needed to run the business, as a share of revenue (Koller Ch. 14). */
 const OPERATING_CASH_PCT = 0.02;
@@ -50,6 +50,9 @@ const FINANCIAL_NAME_PATTERNS = [
 ];
 
 export interface ReorganizedInputs {
+  accountingFramework: AccountingFramework;
+  accountingFrameworkBasis: string;
+  reconciliationStatus: 'complete' | 'partial' | 'unresolved';
   revenue: number | null;
   /** EBIT after the R&D and cycle-normalization adjustments. */
   ebit: number | null;
@@ -295,6 +298,21 @@ export function reorganize(
   opts: { marginalTaxRate: number; cashFallback?: number | null; debtFallback?: number | null }
 ): ReorganizedInputs {
   const adjustments: Adjustment[] = [];
+
+  const accountingFramework = f.accountingFramework;
+  const accountingFrameworkBasis =
+    accountingFramework === 'us-gaap'
+      ? 'U.S. GAAP concepts from SEC EDGAR were used for the balance-sheet and financing-side mapping.'
+      : accountingFramework === 'ifrs'
+        ? 'IFRS concepts were selected for this non-U.S. or foreign-private-issuer filing; equivalent labels were normalized into the Koller schedule.'
+        : 'The source did not expose an accounting-framework marker; mappings are conservative and unresolved rows remain visible.';
+  adjustments.push({
+    label: 'Select accounting framework',
+    chapter: 'Ch. 9 (reorganizing the statements)',
+    applied: accountingFramework !== 'unknown',
+    detail: accountingFrameworkBasis,
+    effects: [],
+  });
 
   // --- Part 5 guard: banks and insurers -----------------------------------
   const fin = detectFinancial(companyName, f);
@@ -605,6 +623,12 @@ export function reorganize(
   const financingComplete = totalDebt !== null && commonEquity !== null;
   const financingTotal = financingComplete ? financingBuild.reduce((sum, item) => sum + item.value, 0) : null;
   const financingReconciliationGap = financingTotal === null ? null : totalFundsInvested - financingTotal;
+  const reconciliationStatus =
+    financingTotal === null
+      ? 'unresolved'
+      : Math.abs(financingReconciliationGap ?? Infinity) <= Math.max(Math.abs(totalFundsInvested) * 0.01, 1)
+        ? 'complete'
+        : 'partial';
 
   const nopat = ebit !== null && (tax.rate ?? tax.effectiveRate) !== null
     ? ebit * (1 - (tax.rate ?? tax.effectiveRate as number)) : null;
@@ -641,6 +665,9 @@ export function reorganize(
     ? null : historicalFreeCashFlow - investorFlowTotal;
 
   return {
+    accountingFramework,
+    accountingFrameworkBasis,
+    reconciliationStatus,
     revenue,
     ebit,
     operatingTaxRate: tax.rate ?? tax.effectiveRate,
@@ -657,6 +684,9 @@ export function reorganize(
     isFinancial: fin.isFinancial,
     cyclical: cycle.cyclical,
     reorganization: {
+      accountingFramework,
+      accountingFrameworkBasis,
+      reconciliationStatus,
       investedCapitalBuild,
       nonoperatingAssetsBuild,
       debtEquivalentsBuild,

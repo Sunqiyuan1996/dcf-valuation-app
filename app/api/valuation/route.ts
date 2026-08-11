@@ -161,7 +161,7 @@ export async function POST(req: NextRequest) {
           exchangeMatched: true,
           foundOn: ['us'],
         };
-        const [saOv, saFacts] = await Promise.all([saOverview(usListing), saStatementFacts(usListing)]);
+        const [saOv, saFacts] = await Promise.all([saOverview(usListing), saStatementFacts(usListing, 'ifrs')]);
         if (saOv?.fundamentals) {
           const official = secExtract;
           const fallback = saOv.fundamentals;
@@ -194,7 +194,7 @@ export async function POST(req: NextRequest) {
       if (mismatch) return NextResponse.json({ error: mismatch }, { status: 404 });
       const ov = listing ? await saOverview(listing) : null;
       secExtract = ov?.fundamentals ?? emptySecExtract(ticker);
-      if (listing) facts = await saStatementFacts(listing);
+      if (listing) facts = await saStatementFacts(listing, 'ifrs');
       // The resolved listing's English name is the fallback, not the bare
       // ticker. It matters more than a label: the name is one of the three
       // tests that decide whether a filer is valued as a bank, and when
@@ -223,7 +223,7 @@ export async function POST(req: NextRequest) {
       const ov = listing ? await saOverview(listing) : null;
       if (listing) {
         companyTitle = listing.name;
-        facts = await saStatementFacts(listing);
+        facts = await saStatementFacts(listing, 'ifrs');
       }
       secExtract = ov?.fundamentals ?? emptySecExtract(ticker);
       if (ov) {
@@ -522,6 +522,9 @@ export async function POST(req: NextRequest) {
 
   const reorganization: Reorganization =
     reorg?.reorganization ?? {
+      accountingFramework: facts?.accountingFramework ?? 'unknown',
+      accountingFrameworkBasis: 'No statement facts were available, so the accounting framework could not be identified.',
+      reconciliationStatus: 'unresolved',
       investedCapitalBuild: [],
       nonoperatingAssetsBuild: [],
       debtEquivalentsBuild: [],
@@ -538,12 +541,18 @@ export async function POST(req: NextRequest) {
     };
 
   log.add(
+    'Accounting framework',
+    reorganization.accountingFramework.toUpperCase(),
+    reorganization.accountingFrameworkBasis,
+    reorganization.accountingFramework === 'unknown' ? 'estimated' : 'source'
+  );
+  log.add(
     'Total funds invested reconciliation',
     reorganization.financingReconciliationGap === null ? 'unresolved' : fmtMoney(reorganization.financingReconciliationGap, currency),
     reorganization.financingReconciliationGap === null
       ? 'financing-side source fields are incomplete; the gap is not forced to zero'
       : 'total funds invested less identified debt, debt equivalents, common equity, equity equivalents, hybrids, and noncontrolling interests',
-    reorganization.financingReconciliationGap !== null && Math.abs(reorganization.financingReconciliationGap) <= Math.max(reorganization.totalFundsInvested * 0.01, 1) ? 'derived' : 'estimated'
+    reorganization.reconciliationStatus === 'complete' ? 'derived' : 'estimated'
   );
   log.add(
     'Historical free cash flow reconstruction',

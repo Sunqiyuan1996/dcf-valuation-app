@@ -3,6 +3,7 @@
 // (name + contact email) -- see https://www.sec.gov/os/webmaster-faq#developers.
 
 import { factsFromEdgar, StatementFacts } from './statements';
+import { AccountingFramework } from './types';
 
 const SEC_USER_AGENT = 'Valuation Analysis Tool contact@example.com';
 
@@ -20,8 +21,15 @@ export interface CompanyFacts {
   entityName: string;
   facts: {
     'us-gaap'?: Record<string, { units: Record<string, XbrlFact[]> }>;
+    'ifrs-full'?: Record<string, { units: Record<string, XbrlFact[]> }>;
     dei?: Record<string, { units: Record<string, XbrlFact[]> }>;
   };
+}
+
+export function accountingFramework(facts: CompanyFacts): AccountingFramework {
+  if (facts.facts['ifrs-full'] && Object.keys(facts.facts['ifrs-full']).length > 0 && !facts.facts['us-gaap']) return 'ifrs';
+  if (facts.facts['us-gaap'] && Object.keys(facts.facts['us-gaap']).length > 0) return 'us-gaap';
+  return 'unknown';
 }
 
 type TickerMap = Record<string, { cik_str: number; ticker: string; title: string }>;
@@ -351,6 +359,7 @@ export function edgarStatementFacts(facts: CompanyFacts): StatementFacts {
   const totalDebt = shortDebt !== null || longDebt !== null ? (shortDebt ?? 0) + (longDebt ?? 0) : null;
 
   return factsFromEdgar({
+    accountingFramework: accountingFramework(facts),
     netPPE: inst(TAGS.netPPE),
     workingCapital,
     goodwill: inst(TAGS.goodwill),

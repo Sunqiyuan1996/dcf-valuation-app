@@ -68,7 +68,7 @@ export async function GET(req: NextRequest) {
       if (listing) {
         report.saOverview = await saOverview(listing);
         report.saStatements = await probeStatements(listing);
-        report.detection = detection(listing.name, await saStatementFacts(listing));
+        report.detection = detection(listing.name, await saStatementFacts(listing, 'ifrs'));
       }
     } else {
       const listing = await saResolve(cls.symbol, cls.exchange!);
@@ -76,7 +76,7 @@ export async function GET(req: NextRequest) {
       if (listing) {
         report.saOverview = await saOverview(listing);
         report.saStatements = await probeStatements(listing);
-        report.detection = detection(listing.name, await saStatementFacts(listing));
+        report.detection = detection(listing.name, await saStatementFacts(listing, 'ifrs'));
       }
     }
   } catch (e: any) {

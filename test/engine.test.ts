@@ -8,7 +8,7 @@ import { estimateBeta, MARKET_UNLEVERED_BETA, relever, smoothRawBeta, unlever } 
 import { equityDcf, EquityDcfInputs } from '../lib/equityDcf';
 import { buildEquityWorkbook } from '../lib/equityWorkbook';
 import { Cell } from '../lib/xlsx';
-import { CompanyFacts, XbrlFact, edgarStatementFacts, extractFinancials, screenRecommendationHistory } from '../lib/secEdgar';
+import { CompanyFacts, XbrlFact, accountingFramework, edgarStatementFacts, extractFinancials, screenRecommendationHistory } from '../lib/secEdgar';
 import { Financials } from '../lib/types';
 import { latestBusinessDate } from '../lib/businessDate';
 import { numericSeriesValues } from '../lib/globalData';
@@ -757,6 +757,31 @@ check('tag order still decides when two tags cover the same period', () => {
   };
   const f = edgarStatementFacts(facts);
   assert.equal(f.totalDebt, 100);
+});
+
+check('accounting framework is disclosed and reconciliation status is never forced', () => {
+  const ifrs = factsFromEdgar({
+    accountingFramework: 'ifrs', revenue: 1000, ebit: 150, netPPE: 500,
+    cash: 120, currentAssets: 500, currentLiabilities: 250, totalDebt: 300,
+    totalEquity: 560, minorityInterest: 20,
+  });
+  const complete = reorganize('IFRS Industrial', ifrs, { marginalTaxRate: 0.25 });
+  assert.equal(complete.accountingFramework, 'ifrs');
+  assert.ok(complete.accountingFrameworkBasis.includes('IFRS'));
+  assert.equal(complete.reorganization.accountingFramework, 'ifrs');
+
+  const unknown = reorganize('Unknown Framework Co', factsFromEdgar({ revenue: 1000, ebit: 150, netPPE: 500 }), { marginalTaxRate: 0.25 });
+  assert.equal(unknown.accountingFramework, 'unknown');
+  assert.equal(unknown.reconciliationStatus, 'unresolved');
+  assert.ok(unknown.reorganization.adjustments.some((a) => a.label === 'Select accounting framework' && !a.applied));
+});
+
+check('SEC framework detection distinguishes US GAAP from IFRS-only facts', () => {
+  const gaap: CompanyFacts = { entityName: 'US Co', facts: { 'us-gaap': { Revenues: { units: { USD: [] } } } } };
+  const ifrs: CompanyFacts = { entityName: 'Foreign Co', facts: { 'ifrs-full': { Revenue: { units: { EUR: [] } } } } };
+  assert.equal(accountingFramework(gaap), 'us-gaap');
+  assert.equal(accountingFramework(ifrs), 'ifrs');
+  assert.equal(edgarStatementFacts(ifrs).accountingFramework, 'ifrs');
 });
 
 check('StockAnalysis total debt is split from leases without double counting', () => {

@@ -11,6 +11,7 @@
 // skipped and reported in the data-quality panel rather than guessed.
 
 import { decodeDevalueNode, numericSeriesValues, SaListing } from './globalData';
+import { AccountingFramework } from './types';
 
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
@@ -289,6 +290,7 @@ const A = {
  */
 export interface StatementFacts {
   source: 'stockanalysis' | 'edgar';
+  accountingFramework: AccountingFramework;
 
   netPPE: number | null;
   workingCapital: number | null;
@@ -366,6 +368,7 @@ export interface StatementFacts {
 function emptyFacts(source: StatementFacts['source']): StatementFacts {
   return {
     source,
+    accountingFramework: 'unknown',
     netPPE: null,
     workingCapital: null,
     goodwill: null,
@@ -430,7 +433,7 @@ function emptyFacts(source: StatementFacts['source']): StatementFacts {
  * Fetch the balance sheet, cash flow statement and income statement for a
  * stockanalysis.com listing and normalize them into StatementFacts.
  */
-export async function saStatementFacts(listing: SaListing): Promise<StatementFacts> {
+export async function saStatementFacts(listing: SaListing, accountingFramework: AccountingFramework = 'unknown'): Promise<StatementFacts> {
   const [bs, cf, is] = await Promise.all([
     fetchStatementTable(listing, 'balance-sheet'),
     fetchStatementTable(listing, 'cash-flow-statement'),
@@ -438,6 +441,7 @@ export async function saStatementFacts(listing: SaListing): Promise<StatementFac
   ]);
 
   const f = emptyFacts('stockanalysis');
+  f.accountingFramework = accountingFramework;
 
   // Balance-sheet levels: prefer the most recent column even when it is a
   // current/TTM snapshot, since a stock figure has no annualization problem.

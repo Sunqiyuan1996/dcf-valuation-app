@@ -1093,7 +1093,13 @@ function Results({
         title="Total funds invested reconciliation"
         chapter="Ch. 9"
         subtitle="The operating and financing views should describe the same capital. A visible gap means source fields or classifications remain unresolved."
+        badge={`${reorg.accountingFramework.toUpperCase()} · ${reorg.reconciliationStatus}`}
       >
+        <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          <span className="font-semibold text-ink">Accounting framework: {reorg.accountingFramework.toUpperCase()}</span>
+          <span className="mx-2 text-slate-300">·</span>
+          {reorg.accountingFrameworkBasis}
+        </div>
         <div className="grid gap-6 p-1 sm:grid-cols-2">
           <Build title="Funds invested" items={[
             { label: 'Invested capital', value: f.investedCapital },

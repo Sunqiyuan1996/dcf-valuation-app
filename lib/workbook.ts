@@ -159,6 +159,8 @@ function investedCapitalSheet(p: ValuationPayload): Sheet {
 
   const totalFunds = reorg.totalFundsInvested;
   rows.push([section('Total funds invested'), section(''), section('')]);
+  rows.push(['Accounting framework', reorg.accountingFramework.toUpperCase(), reorg.accountingFrameworkBasis]);
+  rows.push(['Reconciliation status', reorg.reconciliationStatus, 'Complete means the financing-side gap is within the disclosed tolerance; unresolved inputs are not forced to zero.']);
   rows.push(['Invested capital', money(f.investedCapital), '']);
   rows.push(['Excess cash and marketable securities', money(f.excessCash), 'Operating cash held separately']);
   rows.push(['Nonoperating assets', money(f.nonoperatingAssets), '']);
