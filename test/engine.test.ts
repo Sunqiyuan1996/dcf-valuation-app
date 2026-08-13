@@ -12,6 +12,8 @@ import { CompanyFacts, XbrlFact, accountingFramework, edgarStatementFacts, extra
 import { Financials } from '../lib/types';
 import { latestBusinessDate } from '../lib/businessDate';
 import { numericSeriesValues } from '../lib/globalData';
+import { analyzeComparables } from '../lib/comps';
+import { buildHistoricalSeries, validateSnapshot } from '../lib/valuationHistory';
 
 let failures = 0;
 function check(name: string, fn: () => void) {
@@ -31,6 +33,25 @@ check('StockAnalysis series accept bare and metadata-wrapped field shapes', () =
   assert.deepEqual(numericSeriesValues({ values: [3, 2, 1] }), [3, 2, 1]);
   assert.deepEqual(numericSeriesValues({ annual: [3, 2, 1] }), [3, 2, 1]);
   assert.deepEqual(numericSeriesValues({ unrelated: [3, 2, 1] }), []);
+});
+
+check('comparable analysis excludes incompatible peers and discloses sparse samples', () => {
+  const target = { ticker: 'TARGET', companyName: 'Target', industry: 'Industrial', currency: 'USD', marketCap: 1000, enterpriseValue: 1200, ebit: 100, revenue: 800, netIncome: 70, bookEquity: 500, sharePrice: 10, sharesOutstanding: 100, isFinancial: false, accountingFramework: 'us-gaap' as const, asOf: '2026-08-01', source: 'test' };
+  const peer = (ticker: string, ev: number, financial = false) => ({ ...target, ticker, companyName: ticker, marketCap: ev * 0.8, enterpriseValue: ev, isFinancial: financial });
+  const result = analyzeComparables(target, [peer('P1', 1000), peer('P2', 1100), peer('BANK', 900, true)]);
+  assert.equal(result.status, 'partial');
+  assert.equal(result.includedPeerCount, 2);
+  assert.ok(result.warnings.some((warning) => warning.includes('different financial/industrial')));
+  assert.ok(result.summaries.find((summary) => summary.metric === 'evToEbit')?.impliedValuePerShare !== null);
+});
+
+check('historical valuation series rejects look-ahead snapshots and sorts valid points', () => {
+  const invalid = { ticker: 'TEST', valuationDate: '2025-12-31', informationCutoff: '2026-01-01', currency: 'USD', marketPrice: 10, fairValuePerShare: 12, model: 'enterprise-dcf' as const, source: 'saved-run' as const };
+  assert.ok(validateSnapshot(invalid).some((error) => error.includes('look-ahead')));
+  const valid = (date: string) => ({ ...invalid, valuationDate: date, informationCutoff: date });
+  const series = buildHistoricalSeries('TEST', [valid('2026-02-01'), valid('2025-01-01'), invalid]);
+  assert.deepEqual(series.points.map((point) => point.valuationDate), ['2025-01-01', '2026-02-01']);
+  assert.equal(series.warnings.length, 1);
 });
 
 // A profitable, moderately levered industrial. ROIC = 150*0.75/1000 = 11.25%.
