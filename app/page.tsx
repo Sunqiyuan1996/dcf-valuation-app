@@ -12,6 +12,8 @@ import {
   Reorganization,
 } from '@/lib/types';
 import { EquityDcfResult } from '@/lib/equityDcf';
+import { ComparableAnalysis, ComparableCompany, ComparableMetric, analyzeComparables } from '@/lib/comps';
+import { HistoricalSeries, ValuationSnapshot, buildHistoricalSeries } from '@/lib/valuationHistory';
 import { C, count, fmtPct, fmtSignedPct, fmtX, money } from './format';
 import {
   ConfidenceBar,
@@ -355,6 +357,12 @@ function Results({
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState('valuation');
+  const [historySnapshots, setHistorySnapshots] = useState<ValuationSnapshot[]>([]);
+  const [historyMessage, setHistoryMessage] = useState<string | null>(null);
+  const [peerInput, setPeerInput] = useState('');
+  const [comps, setComps] = useState<ComparableAnalysis | null>(null);
+  const [compsLoading, setCompsLoading] = useState(false);
+  const [compsError, setCompsError] = useState<string | null>(null);
 
   useEffect(() => {
     const ids = ['valuation', 'diagnostics', 'assumptions', 'data-sources'];
@@ -370,6 +378,20 @@ function Results({
     );
     elements.forEach((element) => observer.observe(element));
     return () => observer.disconnect();
+  }, [f.ticker]);
+
+  useEffect(() => {
+    setHistoryMessage(null);
+    setComps(null);
+    setCompsError(null);
+    try {
+      const stored = window.localStorage.getItem(`valuation-history:${f.ticker.toUpperCase()}`);
+      const parsed = stored ? JSON.parse(stored) : [];
+      setHistorySnapshots(Array.isArray(parsed) ? parsed : []);
+    } catch {
+      setHistorySnapshots([]);
+      setHistoryMessage('Saved history is unavailable in this browser.');
+    }
   }, [f.ticker]);
 
   const softRows = dataQuality.filter((row) => row.confidence === 'estimated' || row.confidence === 'default');
@@ -457,6 +479,98 @@ function Results({
       setExporting(false);
     }
   }
+
+  function saveSnapshot() {
+    const today = new Date().toISOString().slice(0, 10);
+    const snapshot: ValuationSnapshot = {
+      ticker: f.ticker,
+      valuationDate: today,
+      informationCutoff: today,
+      currency: c,
+      marketPrice: headline.price,
+      fairValuePerShare: headline.fairValue,
+      model: eq ? 'equity-dcf' : 'enterprise-dcf',
+      source: 'saved-run',
+    };
+    const next = [...historySnapshots.filter((item) => item.valuationDate !== today), snapshot].sort((a, b) =>
+      a.valuationDate.localeCompare(b.valuationDate)
+    );
+    try {
+      window.localStorage.setItem(`valuation-history:${f.ticker.toUpperCase()}`, JSON.stringify(next));
+      setHistorySnapshots(next);
+      setHistoryMessage(`Saved ${today} snapshot.`);
+    } catch {
+      setHistoryMessage('Could not save history in this browser.');
+    }
+  }
+
+  function comparableCompanyFromApi(value: ApiSuccess, tickerOverride?: string): ComparableCompany {
+    const peerFinancials = value.financials;
+    const peerResult = value.result;
+    const peerEq = value.equityValuation ?? null;
+    const isFinancial = peerFinancials.isFinancial;
+    return {
+      ticker: (tickerOverride ?? peerFinancials.ticker).toUpperCase(),
+      companyName: peerFinancials.companyName,
+      industry: isFinancial ? 'Financial institution' : 'Operating company',
+      currency: peerFinancials.currency,
+      marketCap: peerFinancials.marketCap,
+      enterpriseValue: isFinancial ? peerFinancials.marketCap : peerResult.enterpriseValue,
+      ebit: isFinancial ? null : peerFinancials.ebit,
+      revenue: isFinancial ? null : peerFinancials.revenue,
+      netIncome: null,
+      bookEquity: null,
+      sharePrice: isFinancial ? peerEq?.marketPrice ?? peerFinancials.sharePrice : peerFinancials.sharePrice,
+      sharesOutstanding: peerFinancials.sharesOutstanding,
+      isFinancial,
+      accountingFramework: value.reorganization.accountingFramework,
+      asOf: peerFinancials.fiscalYearEnd,
+      source: 'valuation API',
+    };
+  }
+
+  async function runComps() {
+    const tickers = Array.from(
+      new Set(
+        peerInput
+          .split(/[,,;\s]+/)
+          .map((item) => item.trim().toUpperCase())
+          .filter((item) => item && item !== f.ticker.toUpperCase())
+      )
+    );
+    if (tickers.length === 0) {
+      setCompsError('Enter one or more peer tickers, separated by commas.');
+      setComps(null);
+      return;
+    }
+    setCompsLoading(true);
+    setCompsError(null);
+    try {
+      const target = comparableCompanyFromApi(data);
+      const peers = await Promise.all(
+        tickers.map(async (peerTicker) => {
+          const response = await fetch('/api/valuation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ticker: peerTicker }),
+          });
+          const json: ApiResponse = await response.json();
+          if (!response.ok || 'error' in json) throw new Error(`${peerTicker}: ${'error' in json ? json.error : 'valuation failed'}`);
+          if ('needsManualInput' in json) throw new Error(`${peerTicker}: source data is incomplete and requires manual input.`);
+          return comparableCompanyFromApi(json, peerTicker);
+        })
+      );
+      const result = analyzeComparables(target, peers);
+      setComps(result);
+    } catch (error: any) {
+      setComps(null);
+      setCompsError(error?.message ?? 'Comparable analysis failed.');
+    } finally {
+      setCompsLoading(false);
+    }
+  }
+
+  const historicalSeries = buildHistoricalSeries(f.ticker, historySnapshots);
 
   function field(
     key: keyof DcfAssumptions,
@@ -594,6 +708,12 @@ function Results({
                 the spreadsheet can never disagree with what is on screen. */}
             {exportError && <span className="text-[11px] text-negative">{exportError}</span>}
             <button
+              onClick={saveSnapshot}
+              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-xs font-medium text-ink transition hover:border-accent hover:text-accent"
+            >
+              Save snapshot
+            </button>
+            <button
               onClick={exportWorkbook}
               disabled={exporting}
               className="rounded-md border border-slate-300 bg-white px-4 py-2 text-xs font-medium text-ink transition hover:border-accent hover:text-accent disabled:opacity-40"
@@ -607,6 +727,49 @@ function Results({
           </div>
         </div>
       </section>
+
+      <Panel
+        title="Historical value vs market price"
+        chapter="Saved-run history"
+        subtitle="Only snapshots you save appear here. The app does not backfill today's filings into the past, so this chart is an audit trail of dated runs rather than a reconstructed historical series."
+        defaultOpen
+      >
+        <HistoricalValueChart series={historicalSeries} currency={c} />
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3 text-xs text-slate-500">
+          <span>{historicalSeries.points.length === 0 ? 'Save this run to start a history.' : `${historicalSeries.points.length} saved snapshot${historicalSeries.points.length === 1 ? '' : 's'}.`}</span>
+          {historyMessage && <span className="text-accent">{historyMessage}</span>}
+          {historicalSeries.warnings.map((warning) => <span key={warning} className="text-warn">{warning}</span>)}
+        </div>
+      </Panel>
+
+      <Panel
+        title="Comparable companies"
+        chapter="Market cross-check"
+        subtitle="Enter peers to fetch the same dated valuation inputs and compare transparent median multiples. Missing or incompatible observations stay visible instead of becoming zeros."
+        defaultOpen
+      >
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <label className="min-w-0 flex-1 text-xs text-slate-600">
+            Peer tickers
+            <input
+              aria-label="Comparable company peer tickers"
+              value={peerInput}
+              onChange={(event) => setPeerInput(event.target.value)}
+              placeholder="MSFT, GOOGL, ORCL"
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-accent focus:outline-none"
+            />
+          </label>
+          <button
+            onClick={runComps}
+            disabled={compsLoading}
+            className="rounded-md bg-ink px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700 disabled:opacity-40"
+          >
+            {compsLoading ? 'Fetching peers…' : 'Run comps'}
+          </button>
+        </div>
+        {compsError && <p className="mt-3 rounded-md border-l-2 border-warn bg-amber-50 px-3 py-2 text-xs text-amber-800">{compsError}</p>}
+        {comps && <ComparableAnalysisView analysis={comps} currency={c} />}
+      </Panel>
 
       <div id="diagnostics" className="h-px scroll-mt-28" aria-hidden="true" />
       {eq && <EquityModel eq={eq} currency={c} sharesOutstanding={f.sharesOutstanding} />}
@@ -1147,6 +1310,73 @@ function Results({
         </>
       )}
       </div>
+    </div>
+  );
+}
+
+function HistoricalValueChart({ series, currency }: { series: HistoricalSeries; currency: string }) {
+  const width = 760;
+  const height = 240;
+  const pad = { top: 18, right: 18, bottom: 36, left: 54 };
+  const values = series.points.flatMap((point) => [point.marketPrice, point.fairValuePerShare]);
+  if (series.points.length === 0) {
+    return <div className="grid min-h-40 place-items-center rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 text-center text-sm text-slate-500">No saved snapshots yet. Use “Save snapshot” after reviewing a run.</div>;
+  }
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = Math.max(max - min, max * 0.08, 0.01);
+  const x = (index: number) => pad.left + (series.points.length === 1 ? (width - pad.left - pad.right) / 2 : (index / (series.points.length - 1)) * (width - pad.left - pad.right));
+  const y = (value: number) => pad.top + ((max + span * 0.05 - value) / (span * 1.1)) * (height - pad.top - pad.bottom);
+  const path = (key: 'marketPrice' | 'fairValuePerShare') => series.points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${x(index).toFixed(1)} ${y(point[key]).toFixed(1)}`).join(' ');
+  return (
+    <div>
+      <div className="mb-3 flex flex-wrap items-center gap-4 text-xs text-slate-500">
+        <span className="inline-flex items-center gap-1.5"><span className="h-2 w-5 rounded-full bg-sky-600" /> Market price</span>
+        <span className="inline-flex items-center gap-1.5"><span className="h-2 w-5 rounded-full bg-emerald-600" /> Fair value</span>
+        <span className="text-slate-400">{currency} per share</span>
+      </div>
+      <div className="overflow-x-auto">
+        <svg viewBox={`0 0 ${width} ${height}`} className="h-auto min-w-[620px] w-full" role="img" aria-label={`Saved market price and fair value history for ${series.ticker}`}>
+          <line x1={pad.left} x2={width - pad.right} y1={height - pad.bottom} y2={height - pad.bottom} stroke="#cbd5e1" />
+          <line x1={pad.left} x2={pad.left} y1={pad.top} y2={height - pad.bottom} stroke="#cbd5e1" />
+          <text x={pad.left - 8} y={pad.top + 4} textAnchor="end" fontSize="10" fill="#64748b">{money(max, currency, false)}</text>
+          <text x={pad.left - 8} y={height - pad.bottom + 4} textAnchor="end" fontSize="10" fill="#64748b">{money(min, currency, false)}</text>
+          <path d={path('marketPrice')} fill="none" stroke="#0284c7" strokeWidth="2.5" />
+          <path d={path('fairValuePerShare')} fill="none" stroke="#059669" strokeWidth="2.5" />
+          {series.points.map((point, index) => (
+            <g key={`${point.valuationDate}-${index}`}>
+              <circle cx={x(index)} cy={y(point.marketPrice)} r="3.5" fill="#0284c7" />
+              <circle cx={x(index)} cy={y(point.fairValuePerShare)} r="3.5" fill="#059669" />
+              <text x={x(index)} y={height - pad.bottom + 18} textAnchor="middle" fontSize="10" fill="#64748b">{point.valuationDate}</text>
+            </g>
+          ))}
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+function ComparableAnalysisView({ analysis, currency }: { analysis: ComparableAnalysis; currency: string }) {
+  const metricLabel: Record<ComparableMetric, string> = {
+    evToEbit: 'EV / EBIT',
+    evToRevenue: 'EV / Revenue',
+    pe: 'P / E',
+    priceToBook: 'Price / Book',
+  };
+  return (
+    <div className="mt-5 space-y-4">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className={`rounded-full border px-2.5 py-1 font-semibold uppercase ${analysis.status === 'complete' ? 'border-emerald-200 bg-emerald-50 text-positive' : analysis.status === 'partial' ? 'border-amber-200 bg-amber-50 text-warn' : 'border-red-200 bg-red-50 text-negative'}`}>{analysis.status}</span>
+        <span className="text-slate-500">{analysis.includedPeerCount} usable peers · {analysis.excludedPeerCount} excluded or incomplete</span>
+      </div>
+      {analysis.warnings.length > 0 && <ul className="space-y-1.5">{analysis.warnings.map((warning) => <li key={warning} className="rounded-md border-l-2 border-warn bg-amber-50 px-3 py-2 text-xs text-amber-800">{warning}</li>)}</ul>}
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[680px] text-xs tabular-nums">
+          <thead><tr className="border-b border-slate-200 text-left text-slate-400"><th className="py-2 pr-3 font-medium">Metric</th><th className="py-2 pr-3 font-medium">N</th><th className="py-2 pr-3 font-medium">25th</th><th className="py-2 pr-3 font-medium">Median</th><th className="py-2 pr-3 font-medium">75th</th><th className="py-2 pr-3 font-medium">Implied value / share</th></tr></thead>
+          <tbody>{analysis.summaries.map((summary) => <tr key={summary.metric} className="border-b border-slate-100"><td className="py-2 pr-3 font-medium text-slate-700">{metricLabel[summary.metric]}</td><td className="py-2 pr-3 text-slate-500">{summary.sampleSize}</td><td className="py-2 pr-3">{summary.lowerQuartile === null ? '—' : fmtX(summary.lowerQuartile)}</td><td className="py-2 pr-3 font-semibold">{summary.median === null ? '—' : fmtX(summary.median)}</td><td className="py-2 pr-3">{summary.upperQuartile === null ? '—' : fmtX(summary.upperQuartile)}</td><td className="py-2 pr-3">{summary.impliedValuePerShare === null ? '—' : money(summary.impliedValuePerShare, currency, false)}</td></tr>)}</tbody>
+        </table>
+      </div>
+      <div className="overflow-x-auto"><table className="w-full min-w-[680px] text-xs"><thead><tr className="border-b border-slate-200 text-left text-slate-400"><th className="py-2 pr-3 font-medium">Peer</th><th className="py-2 pr-3 font-medium">As of</th><th className="py-2 pr-3 font-medium">EV / EBIT</th><th className="py-2 pr-3 font-medium">EV / Revenue</th><th className="py-2 pr-3 font-medium">Disclosure</th></tr></thead><tbody>{analysis.peers.map((peer) => <tr key={peer.ticker} className="border-b border-slate-100"><td className="py-2 pr-3 font-medium text-slate-700">{peer.ticker}</td><td className="py-2 pr-3 text-slate-500">{peer.asOf}</td><td className="py-2 pr-3 tabular-nums">{peer.multiples.evToEbit === undefined ? '—' : fmtX(peer.multiples.evToEbit)}</td><td className="py-2 pr-3 tabular-nums">{peer.multiples.evToRevenue === undefined ? '—' : fmtX(peer.multiples.evToRevenue)}</td><td className="py-2 pr-3 text-slate-500">{peer.excluded.length ? peer.excluded.join(', ') : 'Included'}</td></tr>)}</tbody></table></div>
     </div>
   );
 }
