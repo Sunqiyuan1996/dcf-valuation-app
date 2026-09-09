@@ -35,6 +35,12 @@ This is the persistent feature list for ideas raised during ad-hoc product revie
 - [ ] Add split/dividend normalization and import/export through saved runs or workbooks.
 - [ ] Decide whether snapshots are generated on demand, on a schedule, or imported from saved workbooks.
 
+### Market-implied assumptions and utility-aware valuation
+
+- [ ] Add a market-implied bridge showing the EV, EV/EBIT, growth, and terminal-return assumptions embedded in the current share price.
+- [ ] Add a utility-specific operating case for generation, tariffs, commissioning, useful lives, and sustaining versus expansion capex.
+- [ ] Compare the generic DCF and utility case side by side without forcing either case to replace the other.
+
 ## Product principles
 
 - Every estimate and accounting classification is disclosed with its basis.
