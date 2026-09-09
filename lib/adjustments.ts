@@ -295,7 +295,13 @@ export function capitalizeRnd(
 export function reorganize(
   companyName: string,
   f: StatementFacts,
-  opts: { marginalTaxRate: number; cashFallback?: number | null; debtFallback?: number | null }
+  opts: {
+    marginalTaxRate: number;
+    cashFallback?: number | null;
+    debtFallback?: number | null;
+    revenueFallback?: number | null;
+    ebitFallback?: number | null;
+  }
 ): ReorganizedInputs {
   const adjustments: Adjustment[] = [];
 
@@ -333,7 +339,7 @@ export function reorganize(
   );
 
   // --- Ch. 14/19: operating vs excess cash --------------------------------
-  const revenue = f.revenue;
+  const revenue = f.revenue ?? opts.revenueFallback ?? null;
   // The balance sheet is the primary source, but when no cash alias resolves
   // there the caller's overview figure is used instead. Without this the whole
   // cash balance silently reads as zero and the bridge adds nothing back.
@@ -463,7 +469,7 @@ export function reorganize(
 
   // --- Part 5: cycle normalization, then Ch. 22 R&D ----------------------
   const cycle = normalizeCycle(f);
-  let ebit = f.ebit;
+  let ebit = f.ebit ?? opts.ebitFallback ?? null;
   if (cycle.cyclical && cycle.normalizedEbit !== null) {
     adjustments.push({
       label: 'Normalize the base year for the cycle',

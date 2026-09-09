@@ -780,6 +780,23 @@ check('tag order still decides when two tags cover the same period', () => {
   assert.equal(f.totalDebt, 100);
 });
 
+check('overview revenue fallback still splits fallback cash into operating and excess cash', () => {
+  const f = factsFromEdgar({});
+  f.revenue = null;
+  f.ebit = null;
+  f.netPPE = 600;
+  f.workingCapital = 200;
+  const r = reorganize('Test Industrials', f, {
+    marginalTaxRate: 0.25,
+    cashFallback: 300,
+    revenueFallback: 1000,
+    ebitFallback: 150,
+  });
+  assert.ok(close(r.operatingCash, 20), 'overview revenue must cap operating cash at 2%');
+  assert.ok(close(r.excessCash, 280), 'the remainder of fallback cash must reach the bridge');
+  assert.ok(close(r.ebit ?? NaN, 150), 'manual EBIT must reach the reorganization inputs');
+});
+
 check('accounting framework is disclosed and reconciliation status is never forced', () => {
   const ifrs = factsFromEdgar({
     accountingFramework: 'ifrs', revenue: 1000, ebit: 150, netPPE: 500,

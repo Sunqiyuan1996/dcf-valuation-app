@@ -254,12 +254,15 @@ export async function POST(req: NextRequest) {
 
   // 2. Reorganize the statements into operating vs nonoperating items
   //    (Koller Ch. 9, 14, 18, 19, 20, 22 and the Part 5 special cases).
+  const ovBody = (body.financialOverrides ?? {}) as Partial<Financials>;
   let reorg: ReorganizedInputs | null = null;
   if (facts !== null) {
     reorg = reorganize(companyTitle, facts, {
       marginalTaxRate: DEFAULT_MARGINAL_TAX_RATE,
       cashFallback: secExtract.cashAndEquivalents,
       debtFallback: secExtract.totalDebt,
+      revenueFallback: secExtract.revenue,
+      ebitFallback: typeof ovBody.ebit === 'number' ? ovBody.ebit : secExtract.ebit,
     });
   }
 
@@ -308,7 +311,6 @@ export async function POST(req: NextRequest) {
 
   // 3. Fill remaining market-data gaps from fundamentals and user overrides;
   //    market cap derives as price x shares when not provided directly.
-  const ovBody = (body.financialOverrides ?? {}) as Partial<Financials>;
   if (quote.price === null && typeof ovBody.sharePrice === 'number') quote.price = ovBody.sharePrice;
   if (quote.sharesOutstanding === null) {
     quote.sharesOutstanding =
