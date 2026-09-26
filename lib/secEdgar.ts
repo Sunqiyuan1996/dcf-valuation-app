@@ -15,6 +15,8 @@ export interface XbrlFact {
   fp: string;
   form: string;
   frame?: string;
+  /** Accession number of the filing the fact came from. */
+  accn?: string;
 }
 
 export interface CompanyFacts {
@@ -79,6 +81,23 @@ function latestInstant(items: XbrlFact[] | undefined): { value: number; end: str
   if (instants.length === 0) return null;
   instants.sort((a, b) => new Date(b.end).getTime() - new Date(a.end).getTime());
   return { value: instants[0].val, end: instants[0].end };
+}
+
+/**
+ * Cover-page share count across every share class. companyfacts reports one
+ * row per class (Alphabet: A, B and C) with the same date and filing, so taking
+ * a single row can halve the count. Rows from the latest filing are summed;
+ * without an accession number there is no safe way to tell classes from
+ * restatements, so a single row is used.
+ */
+function latestSharesAllClasses(items: XbrlFact[] | undefined): { value: number; end: string; classes: number } | null {
+  const latest = latestInstant(items);
+  if (!latest || !items) return null;
+  const top = items.filter((i) => !i.start && i.end === latest.end);
+  const accn = top[0]?.accn;
+  if (!accn) return { ...latest, classes: 1 };
+  const sameFiling = top.filter((i) => i.accn === accn);
+  return { value: sameFiling.reduce((s, i) => s + i.val, 0), end: latest.end, classes: sameFiling.length };
 }
 
 /**
@@ -449,9 +468,9 @@ export function extractFinancials(facts: CompanyFacts): SecExtract {
   const minority = bestMatch(facts, TAGS.minorityInterest, latestInstant);
   const interestExpense = bestMatch(facts, TAGS.interestExpense, latestAnnualDuration);
   // Shares outstanding lives in the "dei" namespace (cover-page data), not us-gaap.
-  // Note: for multi-class share structures this reports one class's latest count,
-  // so it can understate the total -- the value is editable in the UI.
-  const sharesOutstanding = latestInstant(
+  // Multi-class filers report one row per class; they are summed. Classes with
+  // unequal economic rights (e.g. BRK A vs B) still need a manual check.
+  const sharesOutstanding = latestSharesAllClasses(
     facts.facts.dei?.['EntityCommonStockSharesOutstanding']?.units?.shares
   );
 

@@ -12,6 +12,7 @@ import {
   Reorganization,
 } from '@/lib/types';
 import { EquityDcfResult } from '@/lib/equityDcf';
+import { marketImpliedBridge } from '@/lib/dcf';
 import { ComparableAnalysis, ComparableCompany, ComparableMetric, analyzeComparables } from '@/lib/comps';
 import { HistoricalSeries, ValuationSnapshot, buildHistoricalSeries } from '@/lib/valuationHistory';
 import { C, count, fmtPct, fmtSignedPct, fmtX, money } from './format';
@@ -91,6 +92,10 @@ export default function Home() {
   const [manualValues, setManualValues] = useState<Record<string, string>>({});
   const [data, setData] = useState<ApiSuccess | null>(null);
   const [assumptionDraft, setAssumptionDraft] = useState<DcfAssumptions | null>(null);
+  // Overrides behind the result on screen. Recalculate resends them, so figures
+  // typed into the manual form survive, and only assumptions the user actually
+  // edited are pinned: everything else (terminal RONIC = WACC) is re-derived.
+  const [activeOverrides, setActiveOverrides] = useState<{ financialOverrides?: any; assumptionOverrides?: any }>({});
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [recommendationsLoading, setRecommendationsLoading] = useState(true);
   const [recommendationsAsOf, setRecommendationsAsOf] = useState<string | null>(null);
@@ -136,6 +141,7 @@ export default function Home() {
       } else {
         setData(json);
         setAssumptionDraft(json.assumptions);
+        setActiveOverrides(overrides ?? {});
         setNeedsInput(null);
       }
     } catch (e: any) {
@@ -155,8 +161,14 @@ export default function Home() {
   }
 
   function recalculate() {
-    if (!assumptionDraft) return;
-    runValuation({ assumptionOverrides: assumptionDraft });
+    if (!assumptionDraft || !data) return;
+    const edited = Object.fromEntries(
+      Object.entries(assumptionDraft).filter(([k, v]) => !Object.is(v, (data.assumptions as any)[k]))
+    );
+    runValuation({
+      financialOverrides: activeOverrides.financialOverrides,
+      assumptionOverrides: { ...activeOverrides.assumptionOverrides, ...edited },
+    });
   }
 
   return (
@@ -426,6 +438,7 @@ function Results({
           r.marketPrice
         )
       : null;
+  const marketBridge = eq ? null : marketImpliedBridge(f, assumptions, r.enterpriseValue);
   // For a financial, the range under the headline has to come from the equity
   // model's own grid; the enterprise grid is not shown at all.
   const sensitivityValues = (eq ?? r).sensitivity.fairValues.flat().filter((v) => Number.isFinite(v));
@@ -802,6 +815,39 @@ function Results({
           sub={`market ${fmtX(r.impliedMultiples.marketEvToEbit)}`}
         />
       </section>
+
+      {marketBridge && (
+        <Panel
+          title="What the market is pricing in"
+          chapter="Ch. 14–15 — market-implied bridge"
+          subtitle="Today's price is translated through the same enterprise-to-equity bridge as the DCF. Sensitivity crossings are diagnostics, not forecasts."
+          defaultOpen
+        >
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <Stat label="Market equity value" value={m(marketBridge.marketEquityValue)} />
+            <Stat label="Market enterprise value" value={m(marketBridge.marketEnterpriseValue)} bold />
+            <Stat label="Market EV / EBIT" value={marketBridge.marketEvToEbit === null ? '—' : fmtX(marketBridge.marketEvToEbit)} />
+            <Stat label="DCF EV / EBIT" value={marketBridge.dcfEvToEbit === null ? '—' : fmtX(marketBridge.dcfEvToEbit)} />
+          </div>
+          <div className="mt-4 grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm sm:grid-cols-3">
+            <div>
+              <div className="text-xs text-slate-500">Growth implied at base WACC</div>
+              <div className="mt-1 font-semibold tabular-nums text-ink">{impliedGrowth === null ? 'Not bracketed' : fmtPct(impliedGrowth)}</div>
+            </div>
+            <div>
+              <div className="text-xs text-slate-500">WACC implied at base growth</div>
+              <div className="mt-1 font-semibold tabular-nums text-ink">{impliedWacc === null ? 'Not bracketed' : fmtPct(impliedWacc)}</div>
+            </div>
+            <div>
+              <div className="text-xs text-slate-500">Terminal RONIC implied at DCF growth</div>
+              <div className="mt-1 font-semibold tabular-nums text-ink">{marketBridge.impliedTerminalRonic === null ? 'Outside solver range' : fmtPct(marketBridge.impliedTerminalRonic)}</div>
+            </div>
+          </div>
+          <p className="mt-3 text-xs text-slate-500">
+            The terminal RONIC solve holds the current WACC, explicit forecast, and terminal growth fixed while varying only the return on perpetually reinvested capital. “Not bracketed” means the traded price cannot be reached within the disclosed sensitivity range.
+          </p>
+        </Panel>
+      )}
 
       {/* Value driver tree */}
       <Panel title="What drives this valuation" chapter="Ch. 2 & 8 — value-driver tree" defaultOpen>

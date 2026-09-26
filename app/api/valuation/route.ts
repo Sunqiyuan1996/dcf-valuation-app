@@ -39,6 +39,8 @@ const DEFAULT_RISK_FREE_RATE = 0.043;
 const DEFAULT_MARGINAL_TAX_RATE = 0.25;
 /** Last-resort ROIC for inferring invested capital when the balance sheet is unusable. */
 const FALLBACK_ROIC = 0.15;
+/** Secured-debt spread over the risk-free rate for implied lease interest (Ch. 20). */
+const LEASE_RATE_SPREAD = 0.015;
 
 /** Empty extract for listings where no fundamentals source succeeded. */
 function emptySecExtract(ticker: string): SecExtract {
@@ -252,6 +254,14 @@ export async function POST(req: NextRequest) {
   // so restate the value now that it is settled.
   if (quote.price !== null) log.setValue('Share price', fmtMoney(quote.price, currency));
 
+  // Needed before the reorganization: it prices the implied lease interest.
+  const sovereign = await fetchGovernmentBondYield(cls?.suffix ?? 'US');
+  if (sovereign.rate === null) estimatedFields.push(`riskFreeRate (${market.name} 10-year unavailable)`);
+  // The old US-yield-plus-spread rule survives only as a disclosed outage
+  // fallback. The normal path uses the country's sovereign yield directly.
+  const fallbackUs = sovereign.rate === null ? await fetchGovernmentBondYield('US') : null;
+  const riskFreeRate = sovereign.rate ?? localRiskFreeRate(fallbackUs?.rate ?? DEFAULT_RISK_FREE_RATE, market);
+
   // 2. Reorganize the statements into operating vs nonoperating items
   //    (Koller Ch. 9, 14, 18, 19, 20, 22 and the Part 5 special cases).
   const ovBody = (body.financialOverrides ?? {}) as Partial<Financials>;
@@ -263,6 +273,7 @@ export async function POST(req: NextRequest) {
       debtFallback: secExtract.totalDebt,
       revenueFallback: secExtract.revenue,
       ebitFallback: typeof ovBody.ebit === 'number' ? ovBody.ebit : secExtract.ebit,
+      leaseInterestRate: riskFreeRate + LEASE_RATE_SPREAD,
     });
   }
 
@@ -320,12 +331,6 @@ export async function POST(req: NextRequest) {
     quote.marketCap = quote.price * quote.sharesOutstanding;
   }
 
-  const sovereign = await fetchGovernmentBondYield(cls?.suffix ?? 'US');
-  if (sovereign.rate === null) estimatedFields.push(`riskFreeRate (${market.name} 10-year unavailable)`);
-  // The old US-yield-plus-spread rule survives only as a disclosed outage
-  // fallback. The normal path uses the country's sovereign yield directly.
-  const fallbackUs = sovereign.rate === null ? await fetchGovernmentBondYield('US') : null;
-  const riskFreeRate = sovereign.rate ?? localRiskFreeRate(fallbackUs?.rate ?? DEFAULT_RISK_FREE_RATE, market);
   log.add(
     `${market.name} 10-year government bond`,
     fmtPct(riskFreeRate),

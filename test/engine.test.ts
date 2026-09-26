@@ -1,7 +1,7 @@
 // Offline checks on the DCF engine. No network, no filings: synthetic inputs
 // chosen so every identity can be verified by hand.
 import assert from 'node:assert/strict';
-import { buildForecast, calculateWacc, defaultAssumptions, runDcf } from '../lib/dcf';
+import { buildForecast, calculateWacc, defaultAssumptions, impliedTerminalRonic, marketEnterpriseValueOf, marketImpliedBridge, runDcf } from '../lib/dcf';
 import { capitalizeRnd, detectFinancial, normalizeCycle, operatingTaxRate, reorganize } from '../lib/adjustments';
 import { factsFromEdgar } from '../lib/statements';
 import { estimateBeta, MARKET_UNLEVERED_BETA, relever, smoothRawBeta, unlever } from '../lib/beta';
@@ -52,6 +52,29 @@ check('historical valuation series rejects look-ahead snapshots and sorts valid 
   const series = buildHistoricalSeries('TEST', [valid('2026-02-01'), valid('2025-01-01'), invalid]);
   assert.deepEqual(series.points.map((point) => point.valuationDate), ['2025-01-01', '2026-02-01']);
   assert.equal(series.warnings.length, 1);
+});
+
+check('a growth rate at or above WACC discloses the continuing-value fallback', () => {
+  const f = base();
+  const r = runDcf(f, { ...defaultAssumptions(f, { riskFreeRate: 0.042 }), terminalGrowth: 0.2, terminalIncrementalRoic: 0.1 });
+  assert.ok(r.continuingValueDiagnostics.warnings[0].includes('zero-growth perpetuity'));
+});
+
+check('terminal growth defaults to 2.5% capped at the risk-free rate', () => {
+  assert.equal(defaultAssumptions(base(), { riskFreeRate: 0.042 }).terminalGrowth, 0.025);
+  assert.equal(defaultAssumptions(base(), { riskFreeRate: 0.016 }).terminalGrowth, 0.016);
+});
+
+check('market-implied bridge uses the same enterprise-to-equity adjustments as the DCF', () => {
+  const f = base();
+  const a = defaultAssumptions(f, { riskFreeRate: 0.042 });
+  const r = runDcf(f, a);
+  assert.equal(marketEnterpriseValueOf(f), 2500 + 300 + 40 - 100 - 50 + 20);
+  const bridge = marketImpliedBridge(f, a, r.enterpriseValue);
+  assert.equal(bridge.marketEquityValue, f.marketCap);
+  assert.equal(bridge.marketEnterpriseValue, marketEnterpriseValueOf(f));
+  assert.ok(bridge.marketEvToEbit !== null && bridge.dcfEvToEbit !== null);
+  assert.ok(impliedTerminalRonic(f, a, r.enterpriseValue) !== null);
 });
 
 // A profitable, moderately levered industrial. ROIC = 150*0.75/1000 = 11.25%.
@@ -292,6 +315,11 @@ check('R&D capitalizes over three years with straight-line amortization', () => 
   assert.ok(close(cap.amortization, 30, 1e-9));
   assert.ok(close(cap.currentSpend, 30));
   assert.equal(capitalizeRnd([], 3), null);
+  // One year on file: earlier years assumed equal, so EBIT is not inflated.
+  const short = capitalizeRnd([30], 3)!;
+  assert.ok(close(short.amortization, 30), 'amortization equals spend in steady state');
+  assert.ok(close(short.asset, 60));
+  assert.equal(short.years, 1);
 });
 
 check('operating tax rate strips the interest tax shield and rejects nonsense', () => {
@@ -408,6 +436,50 @@ check('a disclosed operating lease becomes both an asset and a debt equivalent',
   assert.ok(close(r.investedCapital as number, 600 + 100 + 75, 1e-9), 'the ROU asset joins invested capital');
   const leases = r.reorganization.adjustments.find((x) => x.chapter.indexOf('20') >= 0);
   assert.ok(leases !== undefined && leases.applied === true);
+});
+
+check('operating cash stays in invested capital on the line-by-line build', () => {
+  const f = factsFromEdgar({});
+  f.revenue = 1000;
+  f.ebit = 150;
+  f.netPPE = 600;
+  f.cash = 120;
+  f.currentAssets = 420; // 120 cash + 300 receivables and inventory
+  f.currentLiabilities = 200;
+  const r = reorganize('Test Industrials', f, { marginalTaxRate: 0.25 });
+  // OWC = 300 operating assets + 20 operating cash - 200 = 120
+  assert.ok(close(r.investedCapital as number, 600 + 120, 1e-9));
+  assert.ok(close(r.excessCash, 100));
+});
+
+check('deferred tax assets are netted against deferred tax liabilities', () => {
+  const f = factsFromEdgar({});
+  f.revenue = 1000;
+  f.ebit = 150;
+  f.netPPE = 600;
+  f.workingCapital = 100;
+  f.deferredTaxAssets = 50;
+  f.deferredTaxLiabilities = 30;
+  const r = reorganize('Test Industrials', f, { marginalTaxRate: 0.25 });
+  assert.ok(close(r.nonoperatingAssets, 20), 'only the 20 net asset reaches the bridge');
+  const dtl = r.reorganization.financingBuild.find((x) => x.label === 'Deferred-tax equity equivalents');
+  assert.ok(dtl !== undefined && close(dtl.value, 0), 'no net liability remains');
+});
+
+check('US GAAP lease interest is added back to EBIT; IFRS is left alone', () => {
+  const make = (framework: 'us-gaap' | 'ifrs') => {
+    const f = factsFromEdgar({ accountingFramework: framework });
+    f.revenue = 1000;
+    f.ebit = 150;
+    f.netPPE = 600;
+    f.workingCapital = 100;
+    f.operatingLeaseLiabilities = 80;
+    return reorganize('Test Industrials', f, { marginalTaxRate: 0.25, leaseInterestRate: 0.05 });
+  };
+  assert.ok(close(make('us-gaap').ebit as number, 154), '80 x 5% implied interest added back');
+  assert.ok(close(make('ifrs').ebit as number, 150), 'IFRS 16 already excludes lease interest');
+  const skippedAdj = make('ifrs').reorganization.adjustments.find((x) => x.label === 'Add back implied lease interest');
+  assert.ok(skippedAdj !== undefined && skippedAdj.applied === false);
 });
 
 check('unlevering and relevering a beta round-trips (Ch. 15)', () => {
@@ -750,6 +822,24 @@ check('a deprecated tag with only old frames does not win over a current one', (
   assert.equal(x.revenue, 281724000000);
 });
 
+check('multi-class share counts are summed across classes in the latest filing', () => {
+  const facts = msftShapedFacts();
+  const row = (end: string, val: number, accn: string): XbrlFact => ({ end, val, fy: 2025, fp: 'Q2', form: '10-Q', accn });
+  facts.facts.dei = {
+    EntityCommonStockSharesOutstanding: {
+      units: {
+        shares: [
+          row('2025-01-20', 999, 'old'),
+          row('2025-07-20', 5800, 'new'), // class A
+          row('2025-07-20', 860, 'new'), // class B
+          row('2025-07-20', 5450, 'new'), // class C
+        ],
+      },
+    },
+  };
+  assert.equal(extractFinancials(facts).sharesOutstanding, 12110);
+});
+
 check('the growth history is measured on the current tag, not the retired one', () => {
   // Two frames exist under `Revenues` and four under the ASC 606 tag. Reading
   // the retired tag would give a 2009-2010 growth rate driving the forecast.
@@ -852,14 +942,16 @@ check('full funds-invested schedule reconciles operating and financing views', (
     revenue: 1000, ebit: 150, cash: 120, shortTermInvestments: 30,
     currentAssets: 500, currentLiabilities: 250, shortTermDebt: 50, currentLeaseLiabilities: 20,
     netPPE: 600, totalDebt: 300, operatingLeaseLiabilities: 80,
-    totalEquity: 560, minorityInterest: 20, deferredTaxLiabilities: 40,
+    // Equity was 560 when operating cash was dropped from invested capital; the
+    // fixture balanced only because both sides omitted the same 20 of cash.
+    totalEquity: 580, minorityInterest: 20, deferredTaxLiabilities: 40,
     incomeTaxExpense: 30, pretaxIncome: 100, interestExpense: 20,
   });
   const r = reorganize('Reconciled Industrials', f, { marginalTaxRate: 0.25 });
   const owc = r.reorganization.investedCapitalBuild.find((item) => item.label === 'Operating working capital');
-  assert.equal(owc?.value, 170);
-  assert.equal(r.reorganization.totalFundsInvested, 980);
-  assert.equal(r.reorganization.financingTotal, 980);
+  assert.equal(owc?.value, 190);
+  assert.equal(r.reorganization.totalFundsInvested, 1000);
+  assert.equal(r.reorganization.financingTotal, 1000);
   assert.equal(r.reorganization.financingReconciliationGap, 0);
 });
 

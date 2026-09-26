@@ -102,7 +102,7 @@ export function appendDerivedRows(
     f.revenueCagr3y === null ? 'no usable revenue history; 4% default applied' : 'historical 3-year revenue CAGR',
     f.revenueCagr3y === null ? 'default' : 'derived'
   );
-  log.set('Terminal growth', fmtPct(a.terminalGrowth), 'long-run nominal growth assumption (Ch. 12)', 'default');
+  log.set('Terminal growth', fmtPct(a.terminalGrowth), 'long-run nominal growth: 2.5%, capped at the same-currency risk-free rate so perpetual growth does not exceed the nominal economy (Ch. 12)', 'default');
   log.set(
     'Incremental ROIC, stage 1',
     fmtPct(a.stage1IncrementalRoic),

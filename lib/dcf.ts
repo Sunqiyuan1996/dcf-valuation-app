@@ -8,6 +8,7 @@ import {
   ForecastYear,
   ImpliedMultiples,
   LineItem,
+  MarketImpliedBridge,
   Scenario,
   ScenarioAnalysis,
   SensitivityGrid,
@@ -323,8 +324,7 @@ function sensitivityGrid(f: Financials, a: DcfAssumptions, wacc: number): Sensit
  */
 function impliedMultiples(f: Financials, a: DcfAssumptions, enterpriseValue: number, equityValue: number): ImpliedMultiples {
   const nopat = f.ebit * (1 - a.taxRate);
-  const marketEnterpriseValue =
-    f.marketCap + f.totalDebt + f.debtEquivalents - f.excessCash - f.nonoperatingAssets + f.minorityInterest;
+  const marketEnterpriseValue = marketEnterpriseValueOf(f);
 
   return {
     dcfEvToEbit: f.ebit !== 0 ? enterpriseValue / f.ebit : 0,
@@ -332,6 +332,51 @@ function impliedMultiples(f: Financials, a: DcfAssumptions, enterpriseValue: num
     dcfImpliedPe: nopat !== 0 ? equityValue / nopat : 0,
     marketEvToEbit: f.ebit !== 0 ? marketEnterpriseValue / f.ebit : 0,
     marketPe: nopat !== 0 ? f.marketCap / nopat : 0,
+  };
+}
+
+/** Ch. 14: the enterprise value implied by the traded equity price. */
+export function marketEnterpriseValueOf(f: Financials): number {
+  return f.marketCap + f.totalDebt + f.debtEquivalents - f.excessCash - f.nonoperatingAssets + f.minorityInterest;
+}
+
+/**
+ * Solve the terminal RONIC that would make the current market EV equal the
+ * model value, holding the current WACC, growth, and explicit forecast fixed.
+ * A null result is intentional when the price is outside the feasible range.
+ */
+export function impliedTerminalRonic(f: Financials, a: DcfAssumptions, targetEnterpriseValue: number): number | null {
+  if (!Number.isFinite(targetEnterpriseValue) || targetEnterpriseValue <= 0) return null;
+  const wacc = calculateWacc(f, a).wacc;
+  if (!(wacc > a.terminalGrowth)) return null;
+
+  const lower = Math.max(a.terminalGrowth + 0.0001, 0.0001);
+  const upper = 1.5;
+  const valueAt = (terminalRonic: number) => enterpriseValueAt(f, { ...a, terminalIncrementalRoic: terminalRonic }, wacc, a.terminalGrowth);
+  const lowValue = valueAt(lower);
+  const highValue = valueAt(upper);
+  if (!Number.isFinite(lowValue) || !Number.isFinite(highValue) || targetEnterpriseValue < lowValue || targetEnterpriseValue > highValue) return null;
+
+  let lo = lower;
+  let hi = upper;
+  for (let i = 0; i < 60; i += 1) {
+    const mid = (lo + hi) / 2;
+    if (valueAt(mid) < targetEnterpriseValue) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+export function marketImpliedBridge(f: Financials, a: DcfAssumptions, dcfEnterpriseValue: number): MarketImpliedBridge {
+  const marketEnterpriseValue = marketEnterpriseValueOf(f);
+  return {
+    marketEquityValue: f.marketCap,
+    marketEnterpriseValue,
+    dcfEnterpriseValue,
+    marketEvToEbit: f.ebit > 0 ? marketEnterpriseValue / f.ebit : null,
+    dcfEvToEbit: f.ebit > 0 ? dcfEnterpriseValue / f.ebit : null,
+    marketPrice: f.sharePrice,
+    impliedTerminalRonic: impliedTerminalRonic(f, a, marketEnterpriseValue),
   };
 }
 
@@ -406,6 +451,13 @@ export function runDcf(f: Financials, a: DcfAssumptions): DcfResult {
   const equityValue = bridge.equityValue;
   const fairValuePerShare = bridge.fairValuePerShare;
 
+  const continuingValueDiagnostics = cvDiagnostics(a, wacc, forecast, continuingValue, pvContinuingValue, enterpriseValue);
+  if (!isFinite(rawCv)) {
+    continuingValueDiagnostics.warnings.unshift(
+      `Terminal growth of ${(a.terminalGrowth * 100).toFixed(1)}% is at or above the ${(wacc * 100).toFixed(1)}% WACC, where the growing perpetuity is undefined. Continuing value was replaced with a zero-growth perpetuity (next-year NOPAT / WACC), so this fair value does not reflect the growth assumption entered. Lower terminal growth below the WACC.`
+    );
+  }
+
   const marketPrice = f.sharePrice;
   const valuationGapPct = marketPrice > 0 ? (fairValuePerShare - marketPrice) / marketPrice : 0;
 
@@ -435,7 +487,7 @@ export function runDcf(f: Financials, a: DcfAssumptions): DcfResult {
 
     bridge,
     economicProfit: economicProfitCheck(f, a, wacc, forecast, continuingValue),
-    continuingValueDiagnostics: cvDiagnostics(a, wacc, forecast, continuingValue, pvContinuingValue, enterpriseValue),
+    continuingValueDiagnostics,
     sensitivity: sensitivityGrid(f, a, wacc),
     impliedMultiples: impliedMultiples(f, a, enterpriseValue, equityValue),
     scenarios: scenarioAnalysis(f, a, wacc),
@@ -465,7 +517,9 @@ export function defaultAssumptions(
     explicitYears: 5,
     fadeYears: 5,
     stage1RevenueGrowth: Math.max(Math.min(growthDefault, 0.3), -0.1),
-    terminalGrowth: 0.025,
+    // Long-run nominal growth cannot outrun the currency's own nominal rate
+    // (Ch. 12), so low-yield currencies (JPY, CHF, CNY) get a lower default.
+    terminalGrowth: Math.min(0.025, macro.riskFreeRate),
     // Cap stage-1 RONIC: a very high current ROIC is usually an artifact of an
     // understated capital base, and Ch. 12 warns against extrapolating it.
     stage1IncrementalRoic: Math.max(Math.min(currentRoic, 0.4), 0.03),

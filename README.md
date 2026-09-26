@@ -20,6 +20,8 @@ The data-quality panel names the source and confidence of every important figure
 
 The results workspace is organized into four navigable tiers: Valuation, Diagnostics, Assumptions, and Data & sources. Diagnostic exhibits are collapsible, assumptions are grouped by decision type, and wide analytical tables retain their row labels while scrolling on smaller screens.
 
+The valuation workspace also includes a market-implied bridge: it translates the traded price into market equity value, enterprise value, EV/EBIT, and sensitivity-based growth/WACC and terminal-RONIC diagnostics using the same bridge as the DCF. Saved-run history is deliberately on-demand and does not backfill past filings. Recalculate resends active manual financial overrides while re-deriving untouched assumptions.
+
 Use `/api/health?ticker=...` to inspect resolution, overview fields, statement keys, cash aliases, financial-institution detection, and source failures.
 
 ## Tickers and currencies

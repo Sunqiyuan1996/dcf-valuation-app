@@ -37,7 +37,7 @@ This is the persistent feature list for ideas raised during ad-hoc product revie
 
 ### Market-implied assumptions and utility-aware valuation
 
-- [ ] Add a market-implied bridge showing the EV, EV/EBIT, growth, and terminal-return assumptions embedded in the current share price.
+- [x] Add a market-implied bridge showing the EV, EV/EBIT, growth, and terminal-return assumptions embedded in the current share price.
 - [ ] Add a utility-specific operating case for generation, tariffs, commissioning, useful lives, and sustaining versus expansion capex.
 - [ ] Compare the generic DCF and utility case side by side without forcing either case to replace the other.
 

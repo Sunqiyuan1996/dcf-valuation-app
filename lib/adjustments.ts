@@ -222,7 +222,9 @@ export function normalizeCycle(f: StatementFacts): {
 export function operatingTaxRate(
   f: StatementFacts,
   ebit: number | null,
-  marginalRate: number
+  marginalRate: number,
+  /** Interest removed from operating expenses, e.g. implied lease interest (Ch. 20). */
+  otherInterestAddedBack = 0
 ): { rate: number | null; detail: string; effectiveRate: number | null } {
   const effectiveRate =
     f.incomeTaxExpense !== null && f.pretaxIncome !== null && f.pretaxIncome > 0
@@ -237,7 +239,7 @@ export function operatingTaxRate(
     };
   }
 
-  const shield = marginalRate * num(f.interestExpense);
+  const shield = marginalRate * (num(f.interestExpense) + otherInterestAddedBack);
   const nonopTax = marginalRate * num(f.interestIncome);
   const operatingTaxes = f.incomeTaxExpense + shield - nonopTax;
   const raw = operatingTaxes / ebit;
@@ -270,7 +272,10 @@ export function operatingTaxRate(
  *   amortization   = sum_i r[i] / L
  *   adjusted EBIT  = EBIT + r[0] - amortization
  *
- * `researchDevelopmentHistory` runs most-recent-first.
+ * `researchDevelopmentHistory` runs most-recent-first. With fewer than L
+ * years on file, the missing years are assumed equal to the oldest observed
+ * spend. Treating them as zero would cut amortization and inflate EBIT by up
+ * to two-thirds of the current R&D budget.
  */
 export function capitalizeRnd(
   history: number[],
@@ -278,6 +283,8 @@ export function capitalizeRnd(
 ): { asset: number; amortization: number; currentSpend: number; years: number } | null {
   const r = history.filter((x) => typeof x === 'number' && isFinite(x) && x > 0).slice(0, life);
   if (r.length === 0) return null;
+  const years = r.length;
+  while (r.length < life) r.push(r[r.length - 1]);
 
   let asset = 0;
   let amortization = 0;
@@ -285,7 +292,7 @@ export function capitalizeRnd(
     asset += (r[i] * (life - i)) / life;
     amortization += r[i] / life;
   }
-  return { asset, amortization, currentSpend: r[0], years: r.length };
+  return { asset, amortization, currentSpend: r[0], years };
 }
 
 // ---------------------------------------------------------------------------
@@ -301,6 +308,8 @@ export function reorganize(
     debtFallback?: number | null;
     revenueFallback?: number | null;
     ebitFallback?: number | null;
+    /** Pre-tax rate for the implied interest on operating leases (Ch. 20). */
+    leaseInterestRate?: number | null;
   }
 ): ReorganizedInputs {
   const adjustments: Adjustment[] = [];
@@ -503,7 +512,7 @@ export function reorganize(
       label: 'Capitalize R&D',
       chapter: 'Ch. 22 (capital-light businesses)',
       applied: true,
-      detail: `R&D capitalized over ${RD_LIFE_YEARS} years using ${rnd.years} year(s) of history. Current-year spend added back to EBIT and replaced with straight-line amortization; the unamortized balance is added to invested capital.`,
+      detail: `R&D capitalized over ${RD_LIFE_YEARS} years using ${rnd.years} year(s) of history${rnd.years < RD_LIFE_YEARS ? ' (earlier years estimated at the oldest observed spend)' : ''}. Current-year spend added back to EBIT and replaced with straight-line amortization; the unamortized balance is added to invested capital.`,
       effects: [
         { field: 'ebit', from: ebit, to: adjustedEbit },
         { field: 'investedCapital (capitalized R&D)', from: 0, to: rnd.asset },
@@ -523,6 +532,34 @@ export function reorganize(
     );
   }
 
+  // --- Ch. 20: lease interest out of EBIT --------------------------------
+  // Under ASC 842 the whole operating-lease cost, interest included, sits in
+  // operating expenses. Once the liability is deducted as debt, leaving that
+  // interest in EBIT charges the lease twice. IFRS 16 already reports lease
+  // interest below operating profit, so nothing is added back there.
+  let leaseInterest = 0;
+  if (leaseLiability !== null && leaseLiability > 0) {
+    const rate = opts.leaseInterestRate;
+    if (accountingFramework !== 'us-gaap') {
+      adjustments.push(skipped('Add back implied lease interest', 'Ch. 20 (leases)',
+        'Not a US GAAP filer: under IFRS 16 lease interest is already reported below operating profit.'));
+    } else if (ebit === null || rate == null || !(rate > 0)) {
+      adjustments.push(skipped('Add back implied lease interest', 'Ch. 20 (leases)',
+        'EBIT or a lease interest rate was unavailable, so the ASC 842 lease cost stays in EBIT while the liability is deducted as debt; value is understated by the implied interest.'));
+    } else {
+      const before = ebit;
+      leaseInterest = leaseLiability * rate;
+      ebit += leaseInterest;
+      adjustments.push({
+        label: 'Add back implied lease interest',
+        chapter: 'Ch. 20 (leases)',
+        applied: true,
+        detail: `ASC 842 operating-lease cost includes interest. Lease liability x ${(rate * 100).toFixed(1)}% (risk-free rate plus 1.5% secured-debt spread, estimated) added back to EBIT so the lease is not charged both in EBIT and in the bridge.`,
+        effects: [{ field: 'ebit', from: before, to: ebit }],
+      });
+    }
+  }
+
   // --- Ch. 9: invested capital build -------------------------------------
   // Prefer a line-by-line operating build: remove nonoperating cash and
   // marketable securities from current assets, and financing debt/leases from
@@ -530,7 +567,7 @@ export function reorganize(
   // the two sides are unavailable.
   const operatingWorkingCapital =
     f.currentAssets !== null && f.currentLiabilities !== null
-      ? f.currentAssets - cash - num(f.shortTermInvestments) -
+      ? f.currentAssets - (cash - operatingCash) - num(f.shortTermInvestments) -
         (f.currentLiabilities - num(f.shortTermDebt) - num(f.currentLeaseLiabilities))
       : f.workingCapital === null ? null : f.workingCapital - excessCash;
 
@@ -541,7 +578,7 @@ export function reorganize(
       label: 'Operating working capital',
       value: operatingWorkingCapital,
       note: f.currentAssets !== null && f.currentLiabilities !== null
-        ? 'operating current assets less noninterest-bearing operating current liabilities'
+        ? 'operating current assets (including operating cash) less noninterest-bearing operating current liabilities'
         : 'fallback: reported net working capital less excess cash',
     });
   }
@@ -592,7 +629,7 @@ export function reorganize(
   );
 
   // --- Ch. 18: operating taxes -------------------------------------------
-  const tax = operatingTaxRate(f, ebit, opts.marginalTaxRate);
+  const tax = operatingTaxRate(f, ebit, opts.marginalTaxRate, leaseInterest);
   adjustments.push(
     tax.rate !== null
       ? {
@@ -612,10 +649,16 @@ export function reorganize(
   if (f.overfundedPensionAssets !== null && f.overfundedPensionAssets > 0) {
     nonoperatingAssetsBuild.push({ label: 'Overfunded pension assets', value: f.overfundedPensionAssets });
   }
-  if (f.deferredTaxAssets !== null && f.deferredTaxAssets > 0) {
-    nonoperatingAssetsBuild.push({ label: 'Deferred tax assets / tax attributes', value: f.deferredTaxAssets, note: 'proxy where tax-loss carryforwards are not separately tagged' });
+  // Deferred tax assets and liabilities are netted before either side is used
+  // (Ch. 18). Adding every DTA to equity value while never deducting the DTL
+  // overstated value; only a net asset position is treated as nonoperating,
+  // and only a net liability as an equity equivalent.
+  const netDeferredTaxAsset = Math.max(num(f.deferredTaxAssets) - num(f.deferredTaxLiabilities), 0);
+  const netDeferredTaxLiability = Math.max(num(f.deferredTaxLiabilities) - num(f.deferredTaxAssets), 0);
+  if (netDeferredTaxAsset > 0) {
+    nonoperatingAssetsBuild.push({ label: 'Net deferred tax assets / tax attributes', value: netDeferredTaxAsset, note: 'deferred tax assets less deferred tax liabilities; proxy where tax-loss carryforwards are not separately tagged' });
   }
-  const expandedNonoperatingAssets = nonoperatingAssets + num(f.overfundedPensionAssets) + num(f.deferredTaxAssets);
+  const expandedNonoperatingAssets = nonoperatingAssets + num(f.overfundedPensionAssets) + netDeferredTaxAsset;
   const totalFundsInvested = num(investedCapital) + excessCash + expandedNonoperatingAssets;
 
   const commonEquity = f.totalEquity === null ? null : Math.max(f.totalEquity - num(f.minorityInterest) - num(f.hybridSecurities), 0);
@@ -623,7 +666,7 @@ export function reorganize(
   if (totalDebt !== null) financingBuild.push({ label: 'Financing debt', value: totalDebt });
   if (debtEquivalents > 0) financingBuild.push({ label: 'Debt equivalents', value: debtEquivalents });
   if (commonEquity !== null) financingBuild.push({ label: 'Common equity', value: commonEquity });
-  if (f.deferredTaxLiabilities !== null) financingBuild.push({ label: 'Deferred-tax equity equivalents', value: f.deferredTaxLiabilities });
+  if (f.deferredTaxLiabilities !== null) financingBuild.push({ label: 'Deferred-tax equity equivalents', value: netDeferredTaxLiability, note: 'deferred tax liabilities net of deferred tax assets' });
   if (f.hybridSecurities !== null) financingBuild.push({ label: 'Hybrid securities', value: f.hybridSecurities });
   if (f.minorityInterest !== null) financingBuild.push({ label: 'Noncontrolling interests', value: f.minorityInterest });
   const financingComplete = totalDebt !== null && commonEquity !== null;

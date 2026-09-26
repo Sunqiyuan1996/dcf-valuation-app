@@ -182,6 +182,17 @@ export interface ImpliedMultiples {
   marketPe: number;
 }
 
+/** Market-implied bridge used to explain the assumptions behind today's price. */
+export interface MarketImpliedBridge {
+  marketEquityValue: number;
+  marketEnterpriseValue: number;
+  dcfEnterpriseValue: number;
+  marketEvToEbit: number | null;
+  dcfEvToEbit: number | null;
+  marketPrice: number;
+  impliedTerminalRonic: number | null;
+}
+
 export interface EquityBridge {
   rows: LineItem[];
   equityValue: number;
