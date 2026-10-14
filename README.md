@@ -12,7 +12,7 @@ The beta estimator uses a raw market beta when available. Otherwise it starts fr
 
 - US filers: SEC EDGAR company facts, with StockAnalysis fallback for incomplete foreign-private-issuer/IFRS data.
 - Non-US listings: StockAnalysis overview and full statement payloads.
-- China A-share quotes: Eastmoney; statements fall back to StockAnalysis where available.
+- China A-share quotes: Eastmoney; statements use StockAnalysis with Eastmoney's detailed filing feed as fallback.
 - Prices: StockAnalysis, with optional Twelve Data fallback when `TWELVE_DATA_KEY` is set.
 - Risk-free rates: same-currency 10-year sovereign/OECD series from FRED, with a disclosed fallback.
 
@@ -30,7 +30,7 @@ US listings use the exchange symbol without a suffix, for example `MSFT` or Novo
 
 Prices and financials are presented in the financial-statement currency. Where a listing price is quoted in another currency, the conversion is disclosed. Currency formatting uses the actual currency code/symbol rather than always displaying dollars.
 
-ICBC (`601398.SS`) currently reaches the bank-specific manual form because neither free statement source supplies its statements. This is an explicit source-coverage limitation, not an enterprise-model fallback.
+ICBC (`601398.SS`) uses the bank equity model with statements from Eastmoney's bank-specific filing schema when StockAnalysis has no statements.
 
 ## Run and verify
 

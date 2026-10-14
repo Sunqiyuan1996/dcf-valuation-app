@@ -72,7 +72,12 @@ export function appendDerivedRows(
 ): DataQualityRow[] {
   const c = f.currency;
   const src: Confidence = facts === null ? 'estimated' : 'source';
-  const from = facts?.source === 'edgar' ? 'SEC EDGAR XBRL' : 'stockanalysis.com statements';
+  const from =
+    facts?.source === 'edgar'
+      ? 'SEC EDGAR XBRL'
+      : facts?.source === 'eastmoney'
+        ? 'Eastmoney statements'
+        : 'stockanalysis.com statements';
 
   log.set('Revenue', fmtMoney(f.revenue, c), `${from}, latest fiscal year`, src);
   log.set('EBIT (operating income)', fmtMoney(f.ebit, c), `${from}, after the Part 3 adjustments below`, src);

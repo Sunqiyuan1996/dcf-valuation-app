@@ -257,7 +257,7 @@ export default function Home() {
 
         <footer className="mt-12 border-t border-slate-200 pt-4 text-xs text-slate-400">
           Data: SEC EDGAR (US fundamentals), stockanalysis.com (prices &amp; non-US fundamentals), Eastmoney (China A
-          quotes), FRED (risk-free rate). Covers OECD-country exchanges (ex LatAm) plus China A/H shares. All sources are
+          quotes and fallback statements), FRED (risk-free rate). Covers OECD-country exchanges (ex LatAm) plus China A/H shares. All sources are
           free and best-effort — verify any figure you plan to rely on. Research only, not investment advice.
         </footer>
       </div>

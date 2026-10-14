@@ -2,8 +2,9 @@
 // statements into NOPAT / invested capital / FCF the way Koller, Goedhart &
 // Wessels do in "Valuation" Ch. 9 ("Reorganizing the Financial Statements").
 //
-// Two sources produce the same normalized StatementFacts shape:
+// Three sources produce the same normalized StatementFacts shape:
 //   - stockanalysis.com's per-statement page payloads (non-US listings), and
+//   - Eastmoney's detailed statement feed (China A-share fallback), and
 //   - SEC EDGAR XBRL company facts (US listings, see secEdgar.ts).
 //
 // Every field is nullable. Downstream adjustments (leases, R&D, operating
@@ -25,6 +26,13 @@ export interface StatementTable {
 }
 
 export type StatementKind = 'balance-sheet' | 'cash-flow-statement' | 'income-statement' | 'ratios';
+
+export function statementDataUrl(listing: SaListing, kind: StatementKind): string {
+  const base = listing.path.includes('/')
+    ? `https://stockanalysis.com/quote/${listing.path}`
+    : `https://stockanalysis.com/stocks/${listing.path}`;
+  return `${base}/financials/${kind}/__data.json?x-sveltekit-trailing-slash=1`;
+}
 
 async function getJson(url: string): Promise<any | null> {
   try {
@@ -56,12 +64,7 @@ export async function fetchStatementTable(
   listing: SaListing,
   kind: StatementKind
 ): Promise<StatementTable | null> {
-  const base = listing.path.includes('/')
-    ? `https://stockanalysis.com/quote/${listing.path}`
-    : `https://stockanalysis.com/stocks/${listing.path}`;
-  // The income statement is the default /financials/ view; the others are subpaths.
-  const sub = kind === 'income-statement' ? '' : `${kind}/`;
-  const payload = await getJson(`${base}/financials/${sub}__data.json?x-sveltekit-trailing-slash=1`);
+  const payload = await getJson(statementDataUrl(listing, kind));
   const nodes: any[] = Array.isArray(payload?.nodes) ? payload.nodes : [];
 
   for (const node of nodes) {
@@ -289,7 +292,7 @@ const A = {
  * the cycle normalization in Part 5.
  */
 export interface StatementFacts {
-  source: 'stockanalysis' | 'edgar';
+  source: 'stockanalysis' | 'eastmoney' | 'edgar';
   accountingFramework: AccountingFramework;
 
   netPPE: number | null;
@@ -427,6 +430,144 @@ function emptyFacts(source: StatementFacts['source']): StatementFacts {
     cashSource: null,
     unresolved: [],
   };
+}
+
+export interface EastmoneyStatementResult {
+  companyName: string;
+  fiscalYearEnd: string;
+  facts: StatementFacts;
+}
+
+function finiteField(row: any, key: string): number | null {
+  const value = row?.[key];
+  return typeof value === 'number' && isFinite(value) ? value : null;
+}
+
+function datedRows(rows: any[]): any[] {
+  return rows
+    .filter((row) => typeof row?.REPORT_DATE === 'string')
+    .sort((a, b) => String(b.REPORT_DATE).localeCompare(String(a.REPORT_DATE)));
+}
+
+function annualRows(rows: any[]): any[] {
+  return datedRows(rows).filter((row) => String(row.REPORT_DATE).slice(5, 10) === '12-31');
+}
+
+function sumFields(row: any, keys: string[]): number | null {
+  const values = keys.map((key) => finiteField(row, key)).filter((value): value is number => value !== null);
+  return values.length > 0 ? values.reduce((sum, value) => sum + value, 0) : null;
+}
+
+/** Normalize Eastmoney's detailed China A-share statements for the valuation engine. */
+export function eastmoneyFactsFromRows(
+  incomeRows: any[],
+  balanceRows: any[],
+  cashFlowRows: any[]
+): EastmoneyStatementResult | null {
+  const annualIncome = annualRows(incomeRows);
+  const annualCashFlow = annualRows(cashFlowRows);
+  const balance = datedRows(balanceRows)[0] ?? null;
+  const income = annualIncome[0] ?? null;
+  const cashFlow = annualCashFlow[0] ?? null;
+  if (!balance && !income && !cashFlow) return null;
+
+  const f = emptyFacts('eastmoney');
+  const currentAssets = finiteField(balance, 'TOTAL_CURRENT_ASSETS');
+  const currentLiabilities = finiteField(balance, 'TOTAL_CURRENT_LIAB');
+  f.netPPE = finiteField(balance, 'FIXED_ASSET');
+  f.currentAssets = currentAssets;
+  f.currentLiabilities = currentLiabilities;
+  f.workingCapital =
+    currentAssets !== null && currentLiabilities !== null ? currentAssets - currentLiabilities : null;
+  f.totalAssets = finiteField(balance, 'TOTAL_ASSETS');
+  f.totalEquity = finiteField(balance, 'TOTAL_EQUITY');
+  f.cash = finiteField(balance, 'MONETARYFUNDS');
+  f.cashSource = f.cash === null
+    ? null
+    : {
+        field: 'MONETARYFUNDS',
+        period: String(balance.REPORT_DATE).slice(0, 10),
+        interim: String(balance.REPORT_DATE).slice(5, 10) !== '12-31',
+      };
+  f.totalDebt = sumFields(balance, ['SHORT_LOAN', 'LONG_LOAN', 'NONCURRENT_LIAB_1YEAR', 'BOND_PAYABLE']);
+  f.operatingLeaseLiabilities = finiteField(balance, 'LEASE_LIAB');
+  f.goodwill = finiteField(balance, 'GOODWILL');
+  f.intangibles = finiteField(balance, 'INTANGIBLE_ASSET');
+  f.minorityInterest = finiteField(balance, 'MINORITY_EQUITY');
+  f.deferredTaxAssets = finiteField(balance, 'DEFER_TAX_ASSET');
+  f.deferredTaxLiabilities = finiteField(balance, 'DEFER_TAX_LIAB');
+
+  f.revenue = finiteField(income, 'TOTAL_OPERATE_INCOME');
+  // Chinese operating profit is the closest consistently reported EBIT proxy.
+  f.ebit = finiteField(income, 'OPERATE_PROFIT');
+  f.pretaxIncome = finiteField(income, 'TOTAL_PROFIT');
+  f.incomeTaxExpense = finiteField(income, 'INCOME_TAX');
+  f.netIncome = finiteField(income, 'PARENT_NETPROFIT') ?? finiteField(income, 'NETPROFIT');
+  const interestExpense = finiteField(income, 'FE_INTEREST_EXPENSE');
+  f.interestExpense = interestExpense === null ? null : Math.abs(interestExpense);
+  f.interestIncome = finiteField(income, 'FE_INTEREST_INCOME');
+
+  f.depreciationAmortization = sumFields(cashFlow, [
+    'FA_IR_DEPR',
+    'IA_AMORTIZE',
+    'LPE_AMORTIZE',
+    'USERIGHT_ASSET_AMORTIZE',
+  ]);
+  const capex = finiteField(cashFlow, 'CONSTRUCT_LONG_ASSET');
+  f.capex = capex === null ? null : Math.abs(capex);
+  f.revenueHistory = annualIncome
+    .map((row) => finiteField(row, 'TOTAL_OPERATE_INCOME'))
+    .filter((value): value is number => value !== null);
+  f.ebitHistory = annualIncome
+    .map((row) => finiteField(row, 'OPERATE_PROFIT'))
+    .filter((value): value is number => value !== null);
+  if (f.ebit !== null && f.depreciationAmortization !== null) {
+    f.ebitda = f.ebit + f.depreciationAmortization;
+  }
+  f.unresolved = unresolvedNames(f);
+
+  const source = income ?? balance ?? cashFlow;
+  return {
+    companyName: typeof source?.SECURITY_NAME_ABBR === 'string' ? source.SECURITY_NAME_ABBR : '',
+    fiscalYearEnd: typeof income?.REPORT_DATE === 'string' ? income.REPORT_DATE.slice(0, 10) : 'unknown',
+    facts: f,
+  };
+}
+
+function eastmoneyStatementUrl(symbol: string, suffix: string, reportName: string): string {
+  const secucode = `${symbol}.${suffix === 'SZ' ? 'SZ' : 'SH'}`;
+  const filter = encodeURIComponent(`(SECUCODE="${secucode}")`);
+  return (
+    `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=${reportName}` +
+    `&columns=ALL&filter=${filter}&pageNumber=1&pageSize=12&sortTypes=-1` +
+    '&sortColumns=REPORT_DATE&source=HSF10&client=PC'
+  );
+}
+
+export async function eastmoneyStatementFacts(
+  symbol: string,
+  suffix: string
+): Promise<EastmoneyStatementResult | null> {
+  const rows = (payload: any): any[] => (Array.isArray(payload?.result?.data) ? payload.result.data : []);
+  const fetchRows = async (statement: 'INCOME' | 'BALANCE' | 'CASHFLOW'): Promise<any[]> => {
+    // Eastmoney separates financial-company statements into bank, securities,
+    // and insurer schemas. Most issuers use the general schema, so only probe
+    // the alternatives when the preceding schema is empty.
+    for (const schema of ['G', 'B', 'S', 'I']) {
+      const payload = await getJson(
+        eastmoneyStatementUrl(symbol, suffix, `RPT_F10_FINANCE_${schema}${statement}`)
+      );
+      const result = rows(payload);
+      if (result.length > 0) return result;
+    }
+    return [];
+  };
+  const [income, balance, cashFlow] = await Promise.all([
+    fetchRows('INCOME'),
+    fetchRows('BALANCE'),
+    fetchRows('CASHFLOW'),
+  ]);
+  return eastmoneyFactsFromRows(income, balance, cashFlow);
 }
 
 /**

@@ -17,7 +17,7 @@ import {
   SaListing,
   SUPPORTED_EXCHANGES_HELP,
 } from '@/lib/globalData';
-import { saStatementFacts, StatementFacts } from '@/lib/statements';
+import { eastmoneyStatementFacts, saStatementFacts, StatementFacts } from '@/lib/statements';
 import { reorganize, ReorganizedInputs } from '@/lib/adjustments';
 import { costOfDebt, localRiskFreeRate, marketParams } from '@/lib/costOfCapital';
 import { appendDerivedRows, fmtMoney, fmtPct, QualityLog } from '@/lib/dataQuality';
@@ -115,7 +115,7 @@ export async function POST(req: NextRequest) {
   //    - US (no suffix / .US): SEC EDGAR XBRL fundamentals; price from
   //      stockanalysis.com with Twelve Data as optional keyed fallback.
   //    - China A (.SS/.SH/.SZ): price/shares/market cap from Eastmoney;
-  //      fundamentals from stockanalysis.com.
+  //      fundamentals from StockAnalysis, with Eastmoney filing fallback.
   //    - Other supported exchanges (OECD ex-LatAm + .HK): price and
   //      fundamentals from stockanalysis.com.
   //    Anything the sources miss falls through to the manual-entry form.
@@ -197,12 +197,53 @@ export async function POST(req: NextRequest) {
       const ov = listing ? await saOverview(listing) : null;
       secExtract = ov?.fundamentals ?? emptySecExtract(ticker);
       if (listing) facts = await saStatementFacts(listing, 'ifrs');
+      if (facts === null || (facts.revenue === null && facts.netIncome === null)) {
+        const eastmoney = await eastmoneyStatementFacts(cls.symbol, cls.suffix as string);
+        if (eastmoney) {
+          facts = eastmoney.facts;
+          const annualRevenue = facts.revenueHistory;
+          const years = Math.min(annualRevenue.length - 1, 3);
+          const revenueCagr3y =
+            years >= 1 && annualRevenue[years] > 0
+              ? Math.pow(annualRevenue[0] / annualRevenue[years], 1 / years) - 1
+              : null;
+          const pretax = facts.pretaxIncome;
+          const tax = facts.incomeTaxExpense;
+          const effectiveTaxRate =
+            pretax !== null && pretax > 0 && tax !== null && tax >= 0 && tax / pretax < 0.6
+              ? tax / pretax
+              : null;
+          secExtract = {
+            companyName: eastmoney.companyName || secExtract.companyName,
+            fiscalYearEnd: eastmoney.fiscalYearEnd,
+            revenue: facts.revenue,
+            ebit: facts.ebit,
+            effectiveTaxRate,
+            depreciationAmortization: facts.depreciationAmortization,
+            capex: facts.capex,
+            changeInNWC: facts.changeInNWC,
+            investedCapital: null,
+            totalDebt: facts.totalDebt,
+            cashAndEquivalents: facts.cash,
+            minorityInterest: facts.minorityInterest,
+            revenueCagr3y,
+            interestExpense: facts.interestExpense,
+            sharesOutstanding: cn.sharesOutstanding,
+            missing: facts.unresolved,
+          };
+          log.add(
+            'Financial statement source',
+            'Eastmoney',
+            'StockAnalysis did not provide usable statements; detailed China A-share filings supplied the annual flows and latest balance sheet',
+            'source'
+          );
+        }
+      }
       // The resolved listing's English name is the fallback, not the bare
       // ticker. It matters more than a label: the name is one of the three
       // tests that decide whether a filer is valued as a bank, and when
-      // Eastmoney comes back empty the ticker "601398.SS" matches nothing —
-      // so ICBC, with no statements to fall back on either, would be routed
-      // into the enterprise model it cannot use.
+      // Eastmoney comes back empty the ticker "601398.SS" matches nothing,
+      // which would route a bank into the enterprise model it cannot use.
       companyTitle =
         cn.name ?? listing?.name ?? (secExtract.companyName !== ticker ? secExtract.companyName : ticker);
       currency = ov?.financialCurrency ?? market.currency;
@@ -286,7 +327,7 @@ export async function POST(req: NextRequest) {
     log.add(
       'Cash and equivalents',
       fmtMoney(facts.cash, currency),
-      `${facts.source === 'edgar' ? 'SEC EDGAR XBRL tag' : 'balance sheet line'} "${cashSrc.field}", ` +
+      `${facts.source === 'edgar' ? 'SEC EDGAR XBRL tag' : facts.source === 'eastmoney' ? 'Eastmoney balance-sheet line' : 'balance sheet line'} "${cashSrc.field}", ` +
         (cashSrc.period === ''
           ? 'from the most recent column, which the source did not label with a date'
           : cashSrc.interim

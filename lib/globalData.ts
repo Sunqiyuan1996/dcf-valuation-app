@@ -77,7 +77,7 @@ export const EXCHANGES: Record<string, ExchangeInfo> = {
   TO: { name: 'Toronto', saPrefixes: ['tsx'], market: 'INTL' },
   V: { name: 'TSX Venture', saPrefixes: ['tsxv'], market: 'INTL' },
   AX: { name: 'Australia (ASX)', saPrefixes: ['asx'], market: 'INTL' },
-  NZ: { name: 'New Zealand', saPrefixes: ['nzx'], market: 'INTL' },
+  NZ: { name: 'New Zealand', saPrefixes: ['nze', 'nzx'], market: 'INTL' },
 };
 
 export const SUPPORTED_EXCHANGES_HELP =
@@ -121,6 +121,11 @@ export interface SaListing {
   foundOn: string[];
 }
 
+/** Yahoo-style class separators use '-' while StockAnalysis uses '.'. */
+export function listingSymbolKey(symbol: string): string {
+  return symbol.toUpperCase().replace(/[.-]/g, '');
+}
+
 /**
  * Resolve a bare symbol + exchange to a stockanalysis.com listing via its
  * search API. International listings come back as ids like "etr/SAP".
@@ -137,9 +142,11 @@ export interface SaListing {
 export async function saResolve(symbol: string, exch: ExchangeInfo): Promise<SaListing | null> {
   const data = await getJson(`https://stockanalysis.com/api/search?q=${encodeURIComponent(symbol)}`);
   const results: any[] = Array.isArray(data?.data) ? data.data : [];
-  const upper = symbol.toUpperCase();
+  const wanted = listingSymbolKey(symbol);
   const candidates = results.filter(
-    (r) => typeof r?.s === 'string' && r.s.toUpperCase().endsWith('/' + upper)
+    (r) =>
+      typeof r?.s === 'string' &&
+      listingSymbolKey(String(r.s).split('/').pop() ?? '') === wanted
   );
   const foundOn = Array.from(new Set(candidates.map((r) => String(r.s).split('/')[0].toLowerCase())));
 
@@ -209,7 +216,7 @@ export interface SaOverview {
   priceCurrency: string | null;
   /** Currency the financial statements are reported in (e.g. "CNY"). */
   financialCurrency: string | null;
-  /** True when price was converted via SA's own TTM PE x EPS (HK listings). */
+  /** True when price was converted from a known minor unit or via TTM PE x EPS. */
   priceConverted: boolean;
   /** Derived as TTM net cash / net cash per share (consistent with financials). */
   sharesOutstanding: number | null;
@@ -239,6 +246,14 @@ function firstNum(row: unknown): number | null {
 
 function num(v: unknown): number | null {
   return typeof v === 'number' && isFinite(v) ? v : null;
+}
+
+export function convertKnownPriceUnit(
+  price: number | null,
+  priceCurrency: string | null,
+  financialCurrency: string | null
+): number | null {
+  return price !== null && priceCurrency === 'GBX' && financialCurrency === 'GBP' ? price / 100 : price;
 }
 
 /**
@@ -346,9 +361,9 @@ export async function saOverview(listing: SaListing): Promise<SaOverview | null>
   // Price in financial-statement currency. When the quote currency differs
   // (e.g. HK: price HKD, financials CNY), SA's TTM PE is computed against the
   // financial currency, so PE x TTM EPS recovers the converted price.
-  let price = rawPrice;
-  let priceConverted = false;
-  if (priceCurrency && financialCurrency && priceCurrency !== financialCurrency) {
+  let price = convertKnownPriceUnit(rawPrice, priceCurrency, financialCurrency);
+  let priceConverted = price !== rawPrice;
+  if (!priceConverted && priceCurrency && financialCurrency && priceCurrency !== financialCurrency) {
     const pe = num(va?.ttm?.pe);
     const eps = num(ri?.ttm?.epsdil);
     if (pe !== null && pe > 0 && eps !== null && eps > 0) {

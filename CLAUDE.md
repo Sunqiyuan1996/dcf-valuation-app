@@ -33,7 +33,8 @@ Two non-negotiables the user has restated repeatedly:
 Change it deliberately.
 
 - `lib/globalData.ts` — prices and non-US fundamentals (stockanalysis.com,
-  Eastmoney). `lib/yahooFinance.ts` — FRED risk-free rate.
+  Eastmoney). `lib/statements.ts` also uses Eastmoney's detailed filing feed as
+  the China A-share statement fallback. `lib/yahooFinance.ts` — FRED risk-free rate.
 - `lib/statements.ts` — alias-tolerant statement facts from both SA and EDGAR.
   Field lookup is case- and punctuation-insensitive via `normKey`.
 - `lib/adjustments.ts` — Koller Ch. 9 and Ch. 18–22. `reorganize()` splits
@@ -132,10 +133,9 @@ are suspect, so vary a query parameter.
   field, the balance-sheet date, and whether it is interim — that row is what
   will identify it. Related: `probeStatements()` and the `saStatements` block in
   `/api/health` exist for this and their output has not yet been read.
-- **ICBC (601398.SS) cannot be valued automatically.** Neither Eastmoney nor
-  stockanalysis.com returns statements for it. It correctly reaches the *bank*
-  manual-entry form as 工商银行; that is the current best outcome, not a bug to
-  fix in the engine.
+- China A-share statement fallback must retain Eastmoney's separate general,
+  bank, securities, and insurer schemas. ICBC (`601398.SS`) depends on the bank
+  balance-sheet schema to reach the equity model without manual input.
 - Four stockanalysis.com `__data.json` field-key shapes (cash-flow, income,
   ratios) are unverified. The code degrades to "skipped and flagged" rather than
   failing, so this is non-blocking.

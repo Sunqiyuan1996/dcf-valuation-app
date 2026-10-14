@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { buildForecast, calculateWacc, defaultAssumptions, impliedTerminalRonic, marketEnterpriseValueOf, marketImpliedBridge, runDcf } from '../lib/dcf';
 import { capitalizeRnd, detectFinancial, normalizeCycle, operatingTaxRate, reorganize } from '../lib/adjustments';
-import { factsFromEdgar } from '../lib/statements';
+import { eastmoneyFactsFromRows, factsFromEdgar, statementDataUrl } from '../lib/statements';
 import { estimateBeta, MARKET_UNLEVERED_BETA, relever, smoothRawBeta, unlever } from '../lib/beta';
 import { equityDcf, EquityDcfInputs } from '../lib/equityDcf';
 import { buildEquityWorkbook } from '../lib/equityWorkbook';
@@ -11,7 +11,7 @@ import { Cell } from '../lib/xlsx';
 import { CompanyFacts, XbrlFact, accountingFramework, edgarStatementFacts, extractFinancials, screenRecommendationHistory } from '../lib/secEdgar';
 import { Financials } from '../lib/types';
 import { latestBusinessDate } from '../lib/businessDate';
-import { numericSeriesValues } from '../lib/globalData';
+import { convertKnownPriceUnit, EXCHANGES, listingSymbolKey, numericSeriesValues } from '../lib/globalData';
 import { analyzeComparables } from '../lib/comps';
 import { buildHistoricalSeries, validateSnapshot } from '../lib/valuationHistory';
 
@@ -63,6 +63,56 @@ check('a growth rate at or above WACC discloses the continuing-value fallback', 
 check('terminal growth defaults to 2.5% capped at the risk-free rate', () => {
   assert.equal(defaultAssumptions(base(), { riskFreeRate: 0.042 }).terminalGrowth, 0.025);
   assert.equal(defaultAssumptions(base(), { riskFreeRate: 0.016 }).terminalGrowth, 0.016);
+});
+
+check('StockAnalysis symbol matching tolerates regional class-share separators', () => {
+  assert.equal(listingSymbolKey('NOVO-B'), listingSymbolKey('NOVO.B'));
+  assert.notEqual(listingSymbolKey('NOVO-B'), listingSymbolKey('NOVOB80'));
+});
+
+check('regional quote conventions normalize without changing the requested security', () => {
+  assert.ok(EXCHANGES.NZ.saPrefixes.includes('nze'));
+  assert.equal(convertKnownPriceUnit(1615.5, 'GBX', 'GBP'), 16.155);
+  assert.equal(convertKnownPriceUnit(1615.5, 'GBP', 'GBP'), 1615.5);
+});
+
+check('StockAnalysis statement URLs use the dedicated page for every statement', () => {
+  const listing = { path: 'sha/600025', name: 'Test', exchangeMatched: true, foundOn: ['sha'] };
+  assert.equal(
+    statementDataUrl(listing, 'income-statement'),
+    'https://stockanalysis.com/quote/sha/600025/financials/income-statement/__data.json?x-sveltekit-trailing-slash=1'
+  );
+  assert.equal(
+    statementDataUrl({ ...listing, path: 'msft' }, 'cash-flow-statement'),
+    'https://stockanalysis.com/stocks/msft/financials/cash-flow-statement/__data.json?x-sveltekit-trailing-slash=1'
+  );
+});
+
+check('Eastmoney fallback keeps annual flows and the latest balance-sheet levels separate', () => {
+  const result = eastmoneyFactsFromRows(
+    [
+      { REPORT_DATE: '2026-06-30 00:00:00', TOTAL_OPERATE_INCOME: 60, OPERATE_PROFIT: 12 },
+      { REPORT_DATE: '2025-12-31 00:00:00', SECURITY_NAME_ABBR: 'Test CN', TOTAL_OPERATE_INCOME: 100, OPERATE_PROFIT: 20, TOTAL_PROFIT: 18, INCOME_TAX: 3, PARENT_NETPROFIT: 15 },
+      { REPORT_DATE: '2024-12-31 00:00:00', TOTAL_OPERATE_INCOME: 90, OPERATE_PROFIT: 17 },
+    ],
+    [
+      { REPORT_DATE: '2026-06-30 00:00:00', TOTAL_ASSETS: 300, TOTAL_EQUITY: 180, TOTAL_CURRENT_ASSETS: 80, TOTAL_CURRENT_LIAB: 50, FIXED_ASSET: 140, MONETARYFUNDS: 25, SHORT_LOAN: 10, LONG_LOAN: 30, LEASE_LIAB: 5 },
+    ],
+    [
+      { REPORT_DATE: '2025-12-31 00:00:00', FA_IR_DEPR: 8, IA_AMORTIZE: 2, CONSTRUCT_LONG_ASSET: 12 },
+    ]
+  );
+  assert.ok(result);
+  assert.equal(result.fiscalYearEnd, '2025-12-31');
+  assert.equal(result.facts.source, 'eastmoney');
+  assert.equal(result.facts.revenue, 100);
+  assert.equal(result.facts.ebit, 20);
+  assert.equal(result.facts.workingCapital, 30);
+  assert.equal(result.facts.totalDebt, 40);
+  assert.equal(result.facts.operatingLeaseLiabilities, 5);
+  assert.equal(result.facts.depreciationAmortization, 10);
+  assert.equal(result.facts.cashSource?.interim, true);
+  assert.deepEqual(result.facts.revenueHistory, [100, 90]);
 });
 
 check('market-implied bridge uses the same enterprise-to-equity adjustments as the DCF', () => {

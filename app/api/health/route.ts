@@ -4,7 +4,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveTickerToCik, fetchCompanyFacts, edgarStatementFacts } from '@/lib/secEdgar';
-import { probeStatements, saStatementFacts, StatementFacts } from '@/lib/statements';
+import { eastmoneyStatementFacts, probeStatements, saStatementFacts, StatementFacts } from '@/lib/statements';
 import { detectFinancial } from '@/lib/adjustments';
 import { fetchGovernmentBondYield } from '@/lib/yahooFinance';
 import {
@@ -63,12 +63,19 @@ export async function GET(req: NextRequest) {
       }
     } else if (cls.market === 'CN-A') {
       report.eastmoney = await eastmoneyQuote(cls.symbol, cls.suffix as string);
+      const eastmoneyStatements = await eastmoneyStatementFacts(cls.symbol, cls.suffix as string);
+      report.eastmoneyStatements = eastmoneyStatements;
       const listing = await saResolve(cls.symbol, cls.exchange!);
       report.saListing = listing;
       if (listing) {
         report.saOverview = await saOverview(listing);
         report.saStatements = await probeStatements(listing);
-        report.detection = detection(listing.name, await saStatementFacts(listing, 'ifrs'));
+        const saFacts = await saStatementFacts(listing, 'ifrs');
+        const facts =
+          saFacts.revenue !== null || saFacts.netIncome !== null
+            ? saFacts
+            : eastmoneyStatements?.facts ?? saFacts;
+        report.detection = detection(listing.name, facts);
       }
     } else {
       const listing = await saResolve(cls.symbol, cls.exchange!);
