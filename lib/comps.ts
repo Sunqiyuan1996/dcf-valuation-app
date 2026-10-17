@@ -148,6 +148,7 @@ export function analyzeComparables(target: ComparableCompany, peers: ComparableC
   if (compatible.length !== peers.length) warnings.push('Peers with a different financial/industrial model were excluded.');
   const usable = compatible.filter((peer) => peer.ticker !== target.ticker);
   if (usable.length === 0) warnings.push('No compatible peers were supplied.');
+  if (target.isFinancial) warnings.push('Enterprise-value multiples are not meaningful for banks and insurers; use P/E and price/book.');
   if (usable.some((peer) => peer.accountingFramework === 'unknown')) warnings.push('At least one peer has an unknown accounting framework; compare its multiples with caution.');
   const usableObservations = usable.map(observation);
   const summaries = (['evToEbit', 'evToRevenue', 'pe', 'priceToBook'] as ComparableMetric[]).map((metric) => summary(metric, usableObservations, target));

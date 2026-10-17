@@ -12,6 +12,7 @@ export interface Financials {
   // Income statement (most recent fiscal year / TTM)
   revenue: number;
   ebit: number; // operating income, used as EBITA proxy
+  netIncome: number | null;
   effectiveTaxRate: number; // decimal, e.g. 0.22
 
   // Cash flow / reinvestment inputs
@@ -21,6 +22,7 @@ export interface Financials {
 
   // Balance sheet
   investedCapital: number; // net PP&E + operating working capital + goodwill + capitalized R&D
+  bookEquity: number | null; // common equity: total equity less minority interest
   totalDebt: number; // short + long term debt
   cashAndEquivalents: number;
   minorityInterest: number;

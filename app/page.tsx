@@ -12,7 +12,7 @@ import {
   Reorganization,
 } from '@/lib/types';
 import { EquityDcfResult } from '@/lib/equityDcf';
-import { marketImpliedBridge } from '@/lib/dcf';
+import { marketEnterpriseValueOf, marketImpliedBridge } from '@/lib/dcf';
 import { ComparableAnalysis, ComparableCompany, ComparableMetric, analyzeComparables } from '@/lib/comps';
 import { HistoricalSeries, ValuationSnapshot, buildHistoricalSeries } from '@/lib/valuationHistory';
 import { C, count, fmtPct, fmtSignedPct, fmtX, money } from './format';
@@ -519,7 +519,6 @@ function Results({
 
   function comparableCompanyFromApi(value: ApiSuccess, tickerOverride?: string): ComparableCompany {
     const peerFinancials = value.financials;
-    const peerResult = value.result;
     const peerEq = value.equityValuation ?? null;
     const isFinancial = peerFinancials.isFinancial;
     return {
@@ -528,11 +527,11 @@ function Results({
       industry: isFinancial ? 'Financial institution' : 'Operating company',
       currency: peerFinancials.currency,
       marketCap: peerFinancials.marketCap,
-      enterpriseValue: isFinancial ? peerFinancials.marketCap : peerResult.enterpriseValue,
+      enterpriseValue: isFinancial ? peerFinancials.marketCap : marketEnterpriseValueOf(peerFinancials),
       ebit: isFinancial ? null : peerFinancials.ebit,
       revenue: isFinancial ? null : peerFinancials.revenue,
-      netIncome: null,
-      bookEquity: null,
+      netIncome: peerFinancials.netIncome,
+      bookEquity: peerFinancials.bookEquity,
       sharePrice: isFinancial ? peerEq?.marketPrice ?? peerFinancials.sharePrice : peerFinancials.sharePrice,
       sharesOutstanding: peerFinancials.sharesOutstanding,
       isFinancial,
@@ -547,7 +546,7 @@ function Results({
       new Set(
         peerInput
           .split(/[,,;\s]+/)
-          .map((item) => item.trim().toUpperCase())
+          .map((item) => item.trim().toUpperCase().replace(/\.+$/, ''))
           .filter((item) => item && item !== f.ticker.toUpperCase())
       )
     );
@@ -1422,7 +1421,7 @@ function ComparableAnalysisView({ analysis, currency }: { analysis: ComparableAn
           <tbody>{analysis.summaries.map((summary) => <tr key={summary.metric} className="border-b border-slate-100"><td className="py-2 pr-3 font-medium text-slate-700">{metricLabel[summary.metric]}</td><td className="py-2 pr-3 text-slate-500">{summary.sampleSize}</td><td className="py-2 pr-3">{summary.lowerQuartile === null ? '—' : fmtX(summary.lowerQuartile)}</td><td className="py-2 pr-3 font-semibold">{summary.median === null ? '—' : fmtX(summary.median)}</td><td className="py-2 pr-3">{summary.upperQuartile === null ? '—' : fmtX(summary.upperQuartile)}</td><td className="py-2 pr-3">{summary.impliedValuePerShare === null ? '—' : money(summary.impliedValuePerShare, currency, false)}</td></tr>)}</tbody>
         </table>
       </div>
-      <div className="overflow-x-auto"><table className="w-full min-w-[680px] text-xs"><thead><tr className="border-b border-slate-200 text-left text-slate-400"><th className="py-2 pr-3 font-medium">Peer</th><th className="py-2 pr-3 font-medium">As of</th><th className="py-2 pr-3 font-medium">EV / EBIT</th><th className="py-2 pr-3 font-medium">EV / Revenue</th><th className="py-2 pr-3 font-medium">Disclosure</th></tr></thead><tbody>{analysis.peers.map((peer) => <tr key={peer.ticker} className="border-b border-slate-100"><td className="py-2 pr-3 font-medium text-slate-700">{peer.ticker}</td><td className="py-2 pr-3 text-slate-500">{peer.asOf}</td><td className="py-2 pr-3 tabular-nums">{peer.multiples.evToEbit === undefined ? '—' : fmtX(peer.multiples.evToEbit)}</td><td className="py-2 pr-3 tabular-nums">{peer.multiples.evToRevenue === undefined ? '—' : fmtX(peer.multiples.evToRevenue)}</td><td className="py-2 pr-3 text-slate-500">{peer.excluded.length ? peer.excluded.join(', ') : 'Included'}</td></tr>)}</tbody></table></div>
+      <div className="overflow-x-auto"><table className="w-full min-w-[820px] text-xs"><thead><tr className="border-b border-slate-200 text-left text-slate-400"><th className="py-2 pr-3 font-medium">Peer</th><th className="py-2 pr-3 font-medium">As of</th><th className="py-2 pr-3 font-medium">EV / EBIT</th><th className="py-2 pr-3 font-medium">EV / Revenue</th><th className="py-2 pr-3 font-medium">P / E</th><th className="py-2 pr-3 font-medium">Price / Book</th><th className="py-2 pr-3 font-medium">Disclosure</th></tr></thead><tbody>{analysis.peers.map((peer) => <tr key={peer.ticker} className="border-b border-slate-100"><td className="py-2 pr-3 font-medium text-slate-700">{peer.ticker}</td><td className="py-2 pr-3 text-slate-500">{peer.asOf}</td><td className="py-2 pr-3 tabular-nums">{peer.multiples.evToEbit === undefined ? '—' : fmtX(peer.multiples.evToEbit)}</td><td className="py-2 pr-3 tabular-nums">{peer.multiples.evToRevenue === undefined ? '—' : fmtX(peer.multiples.evToRevenue)}</td><td className="py-2 pr-3 tabular-nums">{peer.multiples.pe === undefined ? '—' : fmtX(peer.multiples.pe)}</td><td className="py-2 pr-3 tabular-nums">{peer.multiples.priceToBook === undefined ? '—' : fmtX(peer.multiples.priceToBook)}</td><td className="py-2 pr-3 text-slate-500">{peer.excluded.length ? peer.excluded.join(', ') : 'Included'}</td></tr>)}</tbody></table></div>
     </div>
   );
 }

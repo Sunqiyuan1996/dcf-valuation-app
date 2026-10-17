@@ -498,6 +498,7 @@ export async function POST(req: NextRequest) {
 
     revenue: revenue ?? 0,
     ebit: ebit ?? 0,
+    netIncome: facts?.netIncome ?? null,
     effectiveTaxRate: taxRate ?? 0.23,
 
     depreciationAmortization: da ?? 0,
@@ -505,6 +506,7 @@ export async function POST(req: NextRequest) {
     changeInNWC: changeInNWC ?? 0,
 
     investedCapital: investedCapital ?? 0,
+    bookEquity,
     totalDebt,
     cashAndEquivalents: cash,
     minorityInterest: reorg?.minorityInterest ?? secExtract.minorityInterest ?? 0,
@@ -624,11 +626,10 @@ export async function POST(req: NextRequest) {
   //    the cost of equity -- is already computed above.
   let equityValuation: EquityDcfResult | null = null;
   if (financials.isFinancial) {
-    // Same two figures the gate above checked for, plus whatever the user typed
-    // into the manual form when the source could not supply them.
-    const ov = body.financialOverrides as any;
-    const netIncome = ov?.netIncome ?? facts?.netIncome ?? null;
-    const equityBase = ov?.bookEquity ?? bookEquity;
+    // Same two figures the gate above checked for, including any manual
+    // overrides already applied to the shared financial payload.
+    const netIncome = financials.netIncome;
+    const equityBase = financials.bookEquity;
     const missing: string[] = [];
     if (equityBase === null) missing.push('book equity');
     if (netIncome === null) missing.push('net income');

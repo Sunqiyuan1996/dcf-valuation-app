@@ -45,6 +45,23 @@ check('comparable analysis excludes incompatible peers and discloses sparse samp
   assert.ok(result.summaries.find((summary) => summary.metric === 'evToEbit')?.impliedValuePerShare !== null);
 });
 
+check('financial-company comps use earnings and book equity, not enterprise multiples', () => {
+  const target = { ticker: 'INS', companyName: 'Insurer', industry: 'Financial institution', currency: 'CNY', marketCap: 1000, enterpriseValue: 1000, ebit: null, revenue: null, netIncome: 80, bookEquity: 800, sharePrice: 10, sharesOutstanding: 100, isFinancial: true, accountingFramework: 'ifrs' as const, asOf: '2025-12-31', source: 'test' };
+  const peer = (ticker: string, marketCap: number, netIncome: number, bookEquity: number) => ({ ...target, ticker, companyName: ticker, marketCap, enterpriseValue: marketCap, netIncome, bookEquity });
+  const result = analyzeComparables(target, [
+    peer('P1', 1200, 100, 900),
+    peer('P2', 1500, 125, 1000),
+    { ...peer('P3', 1800, 150, 1200), accountingFramework: 'unknown' as const },
+  ]);
+  assert.equal(result.status, 'complete');
+  assert.equal(result.includedPeerCount, 3);
+  assert.equal(result.summaries.find((summary) => summary.metric === 'evToEbit')?.sampleSize, 0);
+  assert.equal(result.summaries.find((summary) => summary.metric === 'pe')?.sampleSize, 3);
+  assert.equal(result.summaries.find((summary) => summary.metric === 'priceToBook')?.sampleSize, 3);
+  assert.ok(result.warnings.some((warning) => warning.includes('not meaningful for banks and insurers')));
+  assert.ok(result.warnings.some((warning) => warning.includes('unknown accounting framework')));
+});
+
 check('historical valuation series rejects look-ahead snapshots and sorts valid points', () => {
   const invalid = { ticker: 'TEST', valuationDate: '2025-12-31', informationCutoff: '2026-01-01', currency: 'USD', marketPrice: 10, fairValuePerShare: 12, model: 'enterprise-dcf' as const, source: 'saved-run' as const };
   assert.ok(validateSnapshot(invalid).some((error) => error.includes('look-ahead')));
@@ -137,11 +154,13 @@ function base(): Financials {
     marketName: 'United States',
     revenue: 1000,
     ebit: 150,
+    netIncome: 90,
     effectiveTaxRate: 0.25,
     depreciationAmortization: 60,
     capex: 70,
     changeInNWC: 10,
     investedCapital: 1000,
+    bookEquity: 900,
     totalDebt: 300,
     cashAndEquivalents: 120,
     minorityInterest: 20,
